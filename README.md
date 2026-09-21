@@ -43,7 +43,7 @@ and to catch problems before a release goes out with bad assets:
 ## Inputs
 
 | Name       | Description                                                                                                                                                                             | Required | Default |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- |
 | `tag-name` | Tag/release to attach the signed assets to. Leave unset to use the tag that triggered the workflow (`github.ref_name`). Set explicitly when testing this action from a non-tag trigger. | No       | `""`    |
 
 ## Usage
