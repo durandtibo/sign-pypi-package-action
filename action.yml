@@ -26,7 +26,19 @@ runs:
     - name: Verify checksums
       shell: bash
       run: |
-        cd dist && sha256sum --check SHA256SUMS
+        cd dist || exit
+
+        # Fail if any distribution file isn't listed in SHA256SUMS. Without
+        # this, an extra/unlisted file slipped into the "dist" artifact
+        # would skip checksum verification entirely yet still get matched
+        # by the signing step's dist/*.tar.gz dist/*.whl globs and end up
+        # signed and released.
+        diff \
+          <(printf '%s\n' *.tar.gz *.whl | sort) \
+          <(awk '{print $2}' SHA256SUMS | sort) \
+          || { echo "::error::dist/ contents don't match SHA256SUMS entries"; exit 1; }
+
+        sha256sum --check --strict SHA256SUMS
 
     - name: Sign distributions with Sigstore
       uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # ratchet:sigstore/gh-action-sigstore-python@v3.5.0
@@ -44,6 +56,7 @@ runs:
       uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # ratchet:softprops/action-gh-release@v3.0.3
       with:
         tag_name: ${{ inputs.tag-name || github.ref_name }}
+        fail_on_unmatched_files: true
         files: |
           dist/*.tar.gz
           dist/*.whl

@@ -138,3 +138,51 @@ jobs:
           test "${{ steps.sign.outcome }}" = "failure" || {
             echo "::error::expected sign to fail on tampered checksums, got outcome=${{ steps.sign.outcome }}"; exit 1;
           }
+
+  reject-unlisted-file:
+    # sign must also fail closed if the downloaded "dist" artifact contains
+    # a distribution file that isn't listed in SHA256SUMS at all (as
+    # opposed to reject-tampered-checksums, which covers a listed file
+    # whose contents changed). Without this check, an unlisted file would
+    # skip checksum verification entirely yet still get signed and
+    # released.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Stage fixture package at repo root
+        run: cp -r test/fixtures/pkg/. .
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # ratchet:astral-sh/setup-uv@v10.1.0
+
+      - name: Build package
+        run: uv build
+
+      - name: Generate checksums
+        run: cd dist && sha256sum -- *.tar.gz *.whl > SHA256SUMS
+
+      - name: Add an unlisted distribution file
+        run: cp dist/*.whl dist/extra-unlisted-0.0.0-py3-none-any.whl
+
+      - name: Upload dist artifact under the name sign expects
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+      - name: Run sign action
+        id: sign
+        continue-on-error: true
+        uses: ./
+        with:
+          tag-name: ci-sign-unlisted-file-test-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Assert sign action failed
+        run: |
+          test "${{ steps.sign.outcome }}" = "failure" || {
+            echo "::error::expected sign to fail on unlisted file, got outcome=${{ steps.sign.outcome }}"; exit 1;
+          }
