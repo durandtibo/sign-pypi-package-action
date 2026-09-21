@@ -1,7 +1,5 @@
 name: Sign and release PyPI package
-description: >
-  Signs PyPI distributions with Sigstore and attaches them to the GitHub
-  release. Requires `id-token: write` and `contents: write` permissions.
+description: Signs PyPI distributions with Sigstore and attaches them to the GitHub release.
 
 branding:
   icon: lock
