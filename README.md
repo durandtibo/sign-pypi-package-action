@@ -81,7 +81,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build package
-        uses: durandtibo/build-pypi-package-action@<ref>
+        uses: durandtibo/build-pypi-package-action@0.0.1
 
   sign:
     needs: build

@@ -17,3 +17,9 @@ jobs:
       id-token: write
       actions: read
     uses: ./.github/workflows/test-local.yaml
+  test-stable:
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    uses: ./.github/workflows/test-stable.yaml
