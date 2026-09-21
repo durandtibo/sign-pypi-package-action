@@ -25,3 +25,17 @@ jobs:
 
       - name: Check for changes
         run: git diff --exit-code
+
+  lint-actions:
+    # Only actionlint, not the full `make lint`: lint-yaml currently fails
+    # repo-wide because it doesn't point yamllint at .make/.yamllint.yaml
+    # (a pre-existing gap in the vendored .make/ subtree, out of scope here).
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Lint GitHub Actions workflow files
+        run: make lint-actions

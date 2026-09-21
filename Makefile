@@ -1,5 +1,6 @@
 SHELL = /bin/bash
 
+include .make/actions.mk
 include .make/help.mk
 include .make/makefile.mk
 include .make/markdown.mk
@@ -14,4 +15,4 @@ include .make/yaml.mk
 format: format-yaml format-makefile format-shell format-markdown ## Format all files
 
 .PHONY: lint
-lint: lint-yaml lint-makefile lint-shell lint-markdown ## Lint all files
+lint: lint-yaml lint-makefile lint-shell lint-markdown lint-actions ## Lint all files
