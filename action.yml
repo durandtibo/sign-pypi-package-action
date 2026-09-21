@@ -1,9 +1,11 @@
 name: Sign and release PyPI package
 description: >
-  Downloads the "dist" artifact, verifies its checksums, signs the
-  distributions with Sigstore, uploads a "signatures" artifact, and attaches
-  everything to the current GitHub release. Requires `id-token: write` and
-  `contents: write` permissions on the calling job.
+  Signs PyPI distributions with Sigstore and attaches them to the GitHub
+  release. Requires `id-token: write` and `contents: write` permissions.
+
+branding:
+  icon: lock
+  color: blue
 
 inputs:
   tag-name:
