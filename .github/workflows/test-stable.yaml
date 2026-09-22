@@ -90,7 +90,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Run sign action
-        uses: durandtibo/sign-pypi-package-action@v0.0.1
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ${{ steps.release.outputs.tag }}
 
@@ -168,7 +168,7 @@ jobs:
       - name: Run sign action
         id: sign
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@v0.0.1
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ci-sign-stable-checksum-test-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -216,7 +216,7 @@ jobs:
       - name: Run sign action
         id: sign
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@v0.0.1
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ci-sign-stable-unlisted-file-test-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -255,7 +255,7 @@ jobs:
       - name: Run sign action
         id: sign
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@v0.0.1
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ci-sign-stable-missing-checksums-test-${{ github.run_id }}-${{ github.run_attempt }}
 
