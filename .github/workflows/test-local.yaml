@@ -23,7 +23,7 @@ jobs:
       os_all: ${{ steps.cfg.outputs.os_all }}
     steps:
       - name: Load workflow config
-        uses: durandtibo/workflow-config-action@6a12598cf8ab42549b10a25432394dd826bffa59 # ratchet:durandtibo/workflow-config-action@v0.1
+        uses: durandtibo/workflow-config-action@8c406999ac8ac3cafe656c263759d8ddea3a4edb # ratchet:durandtibo/workflow-config-action@v0.2
         id: cfg
 
   build:
