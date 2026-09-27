@@ -135,13 +135,28 @@ jobs:
   reject-tampered-checksums:
     # sign must fail closed if the downloaded "dist" artifact doesn't match
     # the checksums recorded at build time, before signing anything or
-    # touching a release. Doesn't need id-token/contents permissions since
-    # it never reaches those steps.
+    # touching a release. The pinned stable action always downloads an
+    # artifact literally named "dist" (it predates the dist-artifact-name
+    # input), so this job must not run until the "sign" job's matrix has
+    # finished downloading the "build" job's "dist" artifact, and must
+    # delete it first — artifacts are scoped to the whole run, not the job,
+    # so two "dist" artifacts coexisting would make download-artifact's
+    # by-name lookup ambiguous.
+    needs: [sign]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write # delete the "build" job's "dist" artifact before reusing the name
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Delete previous dist artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source scripts/test-helper.sh
+          delete_dist_artifacts "${{ github.repository }}" "${{ github.run_id }}"
 
       - name: Stage fixture package at repo root
         run: cp -r test/fixtures/pkg/. .
@@ -184,12 +199,23 @@ jobs:
     # opposed to reject-tampered-checksums, which covers a listed file
     # whose contents changed). Without this check, an unlisted file would
     # skip checksum verification entirely yet still get signed and
-    # released.
+    # released. Serialized after reject-tampered-checksums for the same
+    # "dist"-name-collision reason explained there.
+    needs: [reject-tampered-checksums]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write # delete reject-tampered-checksums' "dist" artifact before reusing the name
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Delete previous dist artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source scripts/test-helper.sh
+          delete_dist_artifacts "${{ github.repository }}" "${{ github.run_id }}"
 
       - name: Stage fixture package at repo root
         run: cp -r test/fixtures/pkg/. .
@@ -230,11 +256,23 @@ jobs:
     # sign must fail closed if the downloaded "dist" artifact has no
     # SHA256SUMS file at all, rather than e.g. treating an empty/absent
     # checksum list as "nothing to verify" and signing unverified files.
+    # Serialized after reject-unlisted-file for the same "dist"-name-
+    # collision reason explained on reject-tampered-checksums.
+    needs: [reject-unlisted-file]
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write # delete reject-unlisted-file's "dist" artifact before reusing the name
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Delete previous dist artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source scripts/test-helper.sh
+          delete_dist_artifacts "${{ github.repository }}" "${{ github.run_id }}"
 
       - name: Stage fixture package at repo root
         run: cp -r test/fixtures/pkg/. .
