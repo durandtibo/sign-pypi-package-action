@@ -15,10 +15,6 @@ on:
       - ".github/actions/**"
   workflow_dispatch: # to trigger manually
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
 permissions:
   contents: read
 
