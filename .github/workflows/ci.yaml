@@ -25,5 +25,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: read
+      # write: reject-* jobs delete stale "dist" artifacts between each
+      # other to avoid by-name download ambiguity (see test-stable.yaml).
+      actions: write
     uses: ./.github/workflows/test-stable.yaml

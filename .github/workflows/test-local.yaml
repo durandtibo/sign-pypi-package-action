@@ -158,10 +158,15 @@ jobs:
       - name: Tamper with a built distribution
         run: echo "corrupted" >> dist/*.tar.gz
 
-      - name: Upload dist artifact under the name sign expects
+      - name: Upload dist artifact under a name unique to this job
+        # Must not be "dist": the build/reject-* jobs in this workflow (and
+        # test-stable.yaml, which runs in the same CI run) each upload a
+        # dist artifact, and artifacts are scoped to the whole run, not the
+        # job. A shared name makes download-artifact's by-name lookup
+        # ambiguous, so each scenario gets its own name.
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
         with:
-          name: dist
+          name: dist-tampered-checksums-local
           path: dist/
           retention-days: 1
 
@@ -171,6 +176,7 @@ jobs:
         uses: ./
         with:
           tag-name: ci-sign-checksum-test-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-tampered-checksums-local
 
       - name: Assert sign action failed
         shell: bash
@@ -206,10 +212,12 @@ jobs:
       - name: Add an unlisted distribution file
         run: cp dist/*.whl dist/extra-unlisted-0.0.0-py3-none-any.whl
 
-      - name: Upload dist artifact under the name sign expects
+      - name: Upload dist artifact under a name unique to this job
+        # See the equivalent step in reject-tampered-checksums for why this
+        # can't be "dist".
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
         with:
-          name: dist
+          name: dist-unlisted-file-local
           path: dist/
           retention-days: 1
 
@@ -219,6 +227,7 @@ jobs:
         uses: ./
         with:
           tag-name: ci-sign-unlisted-file-test-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-unlisted-file-local
 
       - name: Assert sign action failed
         shell: bash
@@ -246,9 +255,11 @@ jobs:
         run: uv build
 
       - name: Upload dist artifact without SHA256SUMS
+        # See the equivalent step in reject-tampered-checksums for why this
+        # can't be "dist".
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
         with:
-          name: dist
+          name: dist-missing-checksums-local
           path: dist/
           retention-days: 1
 
@@ -258,6 +269,7 @@ jobs:
         uses: ./
         with:
           tag-name: ci-sign-missing-checksums-test-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-missing-checksums-local
 
       - name: Assert sign action failed
         shell: bash
