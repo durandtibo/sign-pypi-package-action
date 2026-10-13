@@ -32,6 +32,24 @@ assert_release_assets() {
 	done
 }
 
+# delete_dist_artifacts <repository> <run-id>
+# Deletes every "dist"-named artifact already uploaded in this run. Needed
+# because test-stable.yaml's checksum-rejection jobs run the pinned stable
+# action, which always downloads an artifact literally named "dist" (it
+# predates the dist-artifact-name input); those jobs are serialized with
+# "needs" and each must clear out the previous job's "dist" artifact before
+# uploading its own, since artifacts are scoped to the whole run rather
+# than the job and a stale one would make the by-name download ambiguous.
+delete_dist_artifacts() {
+	local repository="$1" run_id="$2"
+	local id
+	gh api "repos/${repository}/actions/runs/${run_id}/artifacts" --paginate \
+		--jq '.artifacts[] | select(.name == "dist") | .id' |
+		while read -r id; do
+			gh api -X DELETE "repos/${repository}/actions/artifacts/${id}"
+		done
+}
+
 # assert_failure <label> <actual-outcome>
 assert_failure() {
 	local label="$1" actual_outcome="$2"
