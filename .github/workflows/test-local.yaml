@@ -50,7 +50,7 @@ jobs:
         run: cd dist && sha256sum -- *.tar.gz *.whl > SHA256SUMS
 
       - name: Upload distribution artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist
           path: dist/
@@ -164,7 +164,7 @@ jobs:
         # dist artifact, and artifacts are scoped to the whole run, not the
         # job. A shared name makes download-artifact's by-name lookup
         # ambiguous, so each scenario gets its own name.
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist-tampered-checksums-local
           path: dist/
@@ -215,7 +215,7 @@ jobs:
       - name: Upload dist artifact under a name unique to this job
         # See the equivalent step in reject-tampered-checksums for why this
         # can't be "dist".
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist-unlisted-file-local
           path: dist/
@@ -257,7 +257,7 @@ jobs:
       - name: Upload dist artifact without SHA256SUMS
         # See the equivalent step in reject-tampered-checksums for why this
         # can't be "dist".
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist-missing-checksums-local
           path: dist/

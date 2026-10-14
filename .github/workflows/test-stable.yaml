@@ -50,7 +50,7 @@ jobs:
         run: cd dist && sha256sum -- *.tar.gz *.whl > SHA256SUMS
 
       - name: Upload distribution artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist
           path: dist/
@@ -174,7 +174,7 @@ jobs:
         run: echo "corrupted" >> dist/*.tar.gz
 
       - name: Upload dist artifact under the name sign expects
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist
           path: dist/
@@ -233,7 +233,7 @@ jobs:
         run: cp dist/*.whl dist/extra-unlisted-0.0.0-py3-none-any.whl
 
       - name: Upload dist artifact under the name sign expects
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist
           path: dist/
@@ -284,7 +284,7 @@ jobs:
         run: uv build
 
       - name: Upload dist artifact without SHA256SUMS
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist
           path: dist/
