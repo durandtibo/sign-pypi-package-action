@@ -70,7 +70,7 @@ runs:
         retention-days: 5
 
     - name: Upload artifacts and signatures to GitHub release
-      uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # ratchet:softprops/action-gh-release@v3.0.3
+      uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # ratchet:softprops/action-gh-release@v3.0.4
       with:
         tag_name: ${{ inputs.tag-name || github.ref_name }}
         fail_on_unmatched_files: true
