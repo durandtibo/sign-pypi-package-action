@@ -48,4 +48,3 @@ jobs:
     permissions:
       contents: write # create/delete the throwaway release and attach assets
       id-token: write # Sigstore OIDC keyless signing
-      actions: read # list this run's artifacts to assert "signatures" was uploaded
