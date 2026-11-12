@@ -18,8 +18,10 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 
 - Use the `Makefile`; run `make help` to list targets.
 - Do not edit `.make/`: it is a shared directory synced by `bot-sync-shared-makefile.yaml`.
-- Run `make format` and `make lint` before committing. Fix what they report instead of disabling
-  rules.
+- Run `make format` and `make lint` before committing; both pass on `main` and CI runs both. Fix what
+  they report instead of disabling rules. The few tool settings that cannot fit prettier-formatted
+  GitHub files (`.yamllint.yaml`, `.markdownlint.yaml`, `checkmake.ini`) live at the repository root,
+  since `.make/` must not be edited; do not add to them to silence a real finding.
 - The end-to-end tests (`ci-action.yaml`) need GitHub runners, OIDC and release
   permissions, so they cannot be run locally; say so in the PR instead of claiming they pass.
 
@@ -63,8 +65,7 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
   holds no steps, only jobs that call the reusable workflows below.
   - `lib-get-test-matrix.yaml`: loads the OS (and Python version) lists from
     `durandtibo/workflow-config-action` once and passes them down as `test-matrix`.
-  - `ci-format.yaml`: YAML, Makefile, shell and Markdown format checks plus shell lint and `actionlint` (runs `make`
-    targets).
+  - `ci-format.yaml`: the format check (`make format`, no diff allowed) and the whole `make lint`.
   - `ci-action.yaml`: the one end-to-end suite, with a `released` input. `released: false` tests this
     checkout (`uses: ./`), `released: true` the pinned last release. The `sign` job covers
     Linux/macOS/Windows; the `case` job is a matrix over the flat list in `test/cases.json`.
