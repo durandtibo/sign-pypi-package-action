@@ -1,0 +1,59 @@
+# Shell tests workflow.
+# Runs, on multiple operating systems, the tests of the bash steps of action.yml that need no
+# GitHub runner features: the escaping of the failure helper (step 0.1) and the table cases of
+# test/cases.json that need no release (steps 0.2 and 1.2 to 1.4). The rest of the cases is
+# run by ci-action.yaml.
+
+name: Shell Tests
+on:
+  workflow_call:
+    inputs:
+      test-matrix:
+        description: "JSON test matrix from lib-get-test-matrix.yaml, loaded once by the caller"
+        required: true
+        type: string
+  workflow_dispatch: # to trigger manually, with the default Linux runner
+    inputs:
+      test-matrix:
+        description: "JSON test matrix (see lib-get-test-matrix.yaml)"
+        required: false
+        default: '{"os_matrix": ["ubuntu-latest"]}'
+        type: string
+
+permissions: {}
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      max-parallel: 8
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(inputs.test-matrix).os_matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Show the version of bash
+        shell: bash
+        run: |
+          bash --version | head -n 1
+
+      - name: Test the escaping of the failure helper
+        # Runs the helper of step 0.1 on hostile text; needs no runner features.
+        shell: bash
+        run: |
+          source scripts/test-helper.sh
+          assert_fail_helper_escapes action.yml
+
+      - name: Run the local table cases
+        # Steps 0.2 and 1.2 to 1.4 on every row that needs no release.
+        shell: bash
+        run: |
+          echo "🧪 Running tests on ${{ matrix.os }}..."
+          make test-local
+          echo "✅ All tests passed"

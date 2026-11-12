@@ -4,11 +4,14 @@
 #
 # - build: builds the fixture package once and uploads it as "dist-base".
 # - sign: across Linux/macOS/Windows, creates a throwaway release, runs the
-#   action, verifies the Sigstore bundles and the asset set, deletes the release.
+#   action, verifies the Sigstore bundles, that the release holds exactly the
+#   expected assets (byte-identical to the dist) and that a consumer can verify
+#   the downloaded assets, then deletes the release.
 # - case: one job per row of test/cases.json. Each stages a modified copy of
-#   dist-base, runs the action once or twice, asserts the exact failed-check id
-#   and, for a rejected run, that nothing was attached to the release. Not
-#   OS-dependent, so it only runs on ubuntu-latest.
+#   dist-base, runs the action once or twice and asserts the exact failed-check
+#   id. A rejected run must leave nothing on the release (no asset, no release
+#   it would have created); an accepted one must leave exactly the expected
+#   assets. Not OS-dependent, so it only runs on ubuntu-latest.
 # - permissions: runs the action on the good dist in a job without id-token:
 #   write and asserts the "permissions" id (permissions are per job, so this
 #   check cannot be a row of the case job).
@@ -51,18 +54,6 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # ratchet:astral-sh/setup-uv@v10.3.3
-
-      - name: Test the escaping of the failure helper
-        # Runs the helper of step 0.1 of this checkout on hostile text; needs no runner features.
-        if: ${{ !inputs.released }}
-        run: |
-          source scripts/test-helper.sh
-          assert_fail_helper_escapes action.yml
-
-      - name: Run the local table cases
-        # Steps 0.2 and 1.2 to 1.4 on every row that needs no release; the rest runs below.
-        if: ${{ !inputs.released }}
-        run: make test-local
 
       - name: Build package
         run: uv build test/fixtures/pkg --out-dir dist
@@ -156,7 +147,20 @@ jobs:
             assert_sigstore_valid "${GITHUB_REPOSITORY}" "${DIST_DIR}/SHA256SUMS"
           fi
 
-      - name: Assert all expected assets were attached to the release
+      - name: Assert the release holds exactly the expected assets
+        # No missing and no extra asset, and each uploaded file is identical to the checksummed one.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          SUMS_BUNDLE: ${{ !inputs.released }}
+          DIST_DIR: ${{ inputs.released && 'dist' || format('{0}/sign-pypi-package', runner.temp) }}
+        run: |
+          source scripts/test-helper.sh
+          assert_release_matches_dist "${TAG}" "${DIST_DIR}" "${SUMS_BUNDLE}"
+
+      - name: Assert a consumer can verify the downloaded release assets
+        # What the README tells users to do: download from the release, verify with the bundle.
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -164,7 +168,7 @@ jobs:
           SUMS_BUNDLE: ${{ !inputs.released }}
         run: |
           source scripts/test-helper.sh
-          assert_release_assets "${TAG}" "${SUMS_BUNDLE}"
+          assert_release_verifies "${TAG}" "${GITHUB_REPOSITORY}" "${SUMS_BUNDLE}"
 
       - name: Delete throwaway release and tag
         if: always()
@@ -178,13 +182,15 @@ jobs:
     # One row of test/cases.json per job. Row fields: name, stage (shell snippet
     # that mutates a copy of the good dist/), expected (failed-check id, "" =
     # accepted), and optionally released, runs (1 default, 2 = run the action
-    # twice) and tag:
+    # twice), artifact and tag:
     #   new         (default) a throwaway release and tag exist
     #   same        like new; with runs: 2 the second run reuses the tag
     #   unreleased  the tag exists but the release does not (the action creates it)
     #   missing     neither the tag nor the release exists
     #   none        tag-name is left unset, as in a run that is not a tag push
     #   dash, space tag-name is invalid ("-bad..." or "bad tag"): no tag or release exists
+    #   draft       the tag exists and so does a draft release, which must stay a draft
+    # The optional artifact field names the artifact to download instead of the staged one.
     # With runs: 2 the first run uses the good dist-base on the tag and the
     # second one the staged artifact: a second tag for "new", the tag for "same".
     # Rows are asserted on the last run; the first run must succeed.
@@ -236,7 +242,7 @@ jobs:
             none) tag="" ;;
             dash) tag="-bad-${BASE}" ;;
             space) tag="bad tag ${BASE}" ;;
-            missing | unreleased | new | same) tag="${BASE}" ;;
+            missing | unreleased | new | same | draft) tag="${BASE}" ;;
             *)
               echo "::error::unknown tag kind '${KIND}' in test/cases.json"
               exit 1
@@ -250,6 +256,7 @@ jobs:
             case "${KIND}" in
               new | same) create_release "${t}" ;;
               unreleased) create_tag "${t}" ;;
+              draft) create_draft_release "${t}" ;;
             esac
           done
           { echo "tag=${tag}"; echo "tag2=${tag2}"; } >>"${GITHUB_OUTPUT}"
@@ -261,7 +268,7 @@ jobs:
         uses: ./
         with:
           tag-name: ${{ steps.setup.outputs.tag }}
-          dist-artifact-name: ${{ matrix.runs == 2 && 'dist-base' || format('dist-{0}', matrix.name) }}
+          dist-artifact-name: ${{ matrix.runs == 2 && 'dist-base' || matrix.artifact || format('dist-{0}', matrix.name) }}
 
       - name: Run sign action (first run) (released)
         id: first-released
@@ -270,7 +277,7 @@ jobs:
         uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ${{ steps.setup.outputs.tag }}
-          dist-artifact-name: ${{ matrix.runs == 2 && 'dist-base' || format('dist-{0}', matrix.name) }}
+          dist-artifact-name: ${{ matrix.runs == 2 && 'dist-base' || matrix.artifact || format('dist-{0}', matrix.name) }}
 
       - name: Run sign action (second run) (this checkout)
         id: second-local
@@ -279,7 +286,7 @@ jobs:
         uses: ./
         with:
           tag-name: ${{ steps.setup.outputs.tag2 }}
-          dist-artifact-name: dist-${{ matrix.name }}
+          dist-artifact-name: ${{ matrix.artifact || format('dist-{0}', matrix.name) }}
 
       - name: Run sign action (second run) (released)
         id: second-released
@@ -288,7 +295,7 @@ jobs:
         uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ${{ steps.setup.outputs.tag2 }}
-          dist-artifact-name: dist-${{ matrix.name }}
+          dist-artifact-name: ${{ matrix.artifact || format('dist-{0}', matrix.name) }}
 
       - name: Assert the expected check failed
         shell: bash
@@ -324,6 +331,18 @@ jobs:
             assert_failed_check "${LABEL}" "${EXPECTED}" "${last}"
           fi
 
+      - name: Assert an accepted run released exactly the distributions
+        # The last run's tag holds the assets of the dist it was given, nothing else.
+        if: ${{ matrix.expected == '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.setup.outputs.tag2 }}
+          SUMS_BUNDLE: ${{ !inputs.released }}
+        run: |
+          source scripts/test-helper.sh
+          assert_release_matches_dist "${TAG}" case-dist "${SUMS_BUNDLE}"
+
       - name: Assert the release created by the action is published
         # Only the action created it, as a draft, and published it after the upload.
         if: ${{ matrix.tag == 'unreleased' && matrix.expected == '' }}
@@ -334,7 +353,17 @@ jobs:
         run: |
           source scripts/test-helper.sh
           assert_release_published "${TAG}"
-          assert_release_assets "${TAG}" true
+
+      - name: Assert a release that was a draft is still a draft
+        # The action only adds to a release that exists; publishing it is not its call.
+        if: ${{ matrix.tag == 'draft' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.setup.outputs.tag }}
+        run: |
+          source scripts/test-helper.sh
+          assert_release_draft "${TAG}"
 
       - name: Assert a rejected run attached nothing
         # A single rejected run must stop before signing and releasing, so its
@@ -347,6 +376,17 @@ jobs:
         run: |
           source scripts/test-helper.sh
           assert_no_assets "${TAG}"
+
+      - name: Assert a rejected run created no release
+        # Without a pushed tag the action must not leave a release (not even a draft) behind.
+        if: ${{ matrix.tag == 'missing' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.setup.outputs.tag }}
+        run: |
+          source scripts/test-helper.sh
+          assert_no_release "${TAG}"
 
       - name: Delete throwaway releases and tags
         if: always()

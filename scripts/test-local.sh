@@ -8,20 +8,12 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 action="${root}/action.yml"
+# shellcheck source=scripts/test-helper.sh
+source "${root}/scripts/test-helper.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 
-# extract_step <name prefix>: the run: block of the step, de-indented.
-extract_step() {
-	awk -v p="- name: $1 " '
-		index($0, p) { s = 1; next }
-		s && /^    - name:/ { exit }
-		s && /^      run: \|/ { r = 1; next }
-		s && r { sub(/^        /, ""); print }
-	' "${action}"
-}
-
-for s in 0.1 0.2 1.2 1.3 1.4; do extract_step "${s}" >"${work}/step-${s}.sh"; done
+for s in 0.1 0.2 1.2 1.3 1.4; do extract_step "${action}" "${s}" >"${work}/step-${s}.sh"; done
 # Step 0.1 writes fail.sh through a heredoc: run it to get the helper.
 RUNNER_TEMP="${work}" bash "${work}/step-0.1.sh"
 
@@ -71,7 +63,7 @@ while IFS='|' read -r name expected kind runs stage; do
 		echo "FAIL ${name}: expected '${expected}', got '${actual}'"
 		failures=$((failures + 1))
 	fi
-done < <(jq -r '.[] | [.name, .expected, (.tag // "new"), (.runs // 1 | tostring), (.stage | @base64)] | join("|")' "${root}/test/cases.json")
+done < <(jq -r '.[] | select(.artifact == null) | [.name, .expected, (.tag // "new"), (.runs // 1 | tostring), (.stage | @base64)] | join("|")' "${root}/test/cases.json")
 
 echo "${ran} local cases, ${failures} failed"
 [ "${failures}" = 0 ]

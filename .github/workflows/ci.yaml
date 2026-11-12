@@ -1,7 +1,7 @@
 # Main CI workflow that orchestrates all quality checks and tests.
-# Runs on pull requests, pushes to main, a weekly schedule, and manual dispatch.
-# It tests the current repository code, including the action that is not
-# released yet. The latest released action is tested by nightly.yaml.
+# Runs on pull requests, pushes to main, a nightly schedule, and manual dispatch.
+# It tests the current repository code, including the action
+# that is not released yet. The latest released action is tested by nightly.yaml.
 #
 # Deliberately NOT called from here, with its own trigger:
 #   - ci-verify-workflows.yaml: lints .github/workflows/* itself.
@@ -9,7 +9,7 @@
 # Permissions are set at the job level, not the workflow level.
 #
 # The individual check jobs below call out to per-check reusable workflows
-# (ci-format.yaml, ci-action.yaml) instead of inlining their steps here, so each
+# (ci-format.yaml, ci-shell.yaml, ci-action.yaml) instead of inlining their steps here, so each
 # check can still be run on its own.
 
 name: CI
@@ -19,7 +19,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: "0 6 * * 1" # Run weekly on Monday at 6:00 AM UTC to catch issues from external changes
+    - cron: "10 9 * * *" # Run nightly at 9:10 AM UTC to catch issues from external changes
   workflow_dispatch: # to trigger manually
 
 permissions: {}
@@ -36,6 +36,15 @@ jobs:
   # Verify formatting and linting of the repository files
   format:
     uses: ./.github/workflows/ci-format.yaml
+    permissions:
+      contents: read
+
+  # Run the local tests of the action's shell steps on multiple OS
+  shell:
+    needs: get-matrix
+    uses: ./.github/workflows/ci-shell.yaml
+    with:
+      test-matrix: ${{ needs.get-matrix.outputs.test_matrix }}
     permissions:
       contents: read
 

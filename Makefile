@@ -18,5 +18,6 @@ format: format-yaml format-makefile format-shell format-markdown ## Format all f
 lint: lint-yaml lint-makefile lint-shell lint-markdown lint-actions ## Lint all files
 
 .PHONY: test-local
-test-local: ## Run the table cases that need no GitHub runner (steps 0.2 and 1.2 to 1.4)
+test-local: ## Run the tests that need no GitHub runner (table cases, step tests, consistency checks)
 	bash scripts/test-local.sh
+	bash scripts/test-steps.sh
