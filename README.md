@@ -116,7 +116,8 @@ jobs:
 The checksums only prove that the artifact was not changed between the build job and this job. They do
 not prove that the build itself was trustworthy: the Sigstore signature attests that this workflow, in
 this repository, signed the files. Steps 1.2 to 1.4 run before any signing or release call and fail
-closed. Inputs reach scripts through `env:` only, and the only secret used is `github.token`.
+closed. Inputs reach scripts through `env:` only, and the only secret used is `github.token`. Text that comes from the artifact (file names, `SHA256SUMS` lines) is escaped before it is written to an annotation
+and fenced in the job summary.
 
 ## Verifying a release
 

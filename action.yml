@@ -46,10 +46,16 @@ runs:
         rm -rf "${RUNNER_TEMP}/failed-check" "${RUNNER_TEMP}/sign-pypi-package"
         cat >"${RUNNER_TEMP}/fail.sh" <<'EOF'
         # fail <id> <title> <details> <how to fix>: record the check id, annotate, summarize, exit 1.
+        # The details can come from the artifact, so they are escaped for the annotation (toolkit
+        # rules) and fenced in the summary with a fence longer than any run of '~' in them.
         fail() {
+          local msg="${3//'%'/%25}" fence='~~~~~~'
+          msg="${msg//$'\r'/%0D}"
+          msg="${msg//$'\n'/%0A}"
+          while [[ "$3" == *"${fence}"* ]]; do fence+='~'; done
           echo "$1" >"${RUNNER_TEMP}/failed-check"
-          echo "::error title=$2::${3//$'\n'/%0A}"
-          printf '### :x: %s\n\n```text\n%s\n```\n\n**How to fix:** %s\n' "$2" "$3" "$4" >>"${GITHUB_STEP_SUMMARY}"
+          echo "::error title=$2::${msg}"
+          printf '### :x: %s\n\n%stext\n%s\n%s\n\n**How to fix:** %s\n' "$2" "${fence}" "$3" "${fence}" "$4" >>"${GITHUB_STEP_SUMMARY}"
           exit 1
         }
         EOF
@@ -97,7 +103,7 @@ runs:
           "Generate it at build time: sha256sum -- *.tar.gz *.whl > SHA256SUMS"
         bad="$(grep -nvE '^[0-9a-f]{64} [ *][A-Za-z0-9][A-Za-z0-9._+-]*\.(tar\.gz|whl)$' SHA256SUMS || true)"
         [ -z "${bad}" ] || fail checksums-file "Malformed SHA256SUMS line" "${bad}" \
-          "Each line must be '<64 hex> <name>.tar.gz|.whl' with a plain file name (no path, no leading '.' or '-')."
+          "Each line must be '<64 hex> <name>.tar.gz|.whl' with a plain file name (no path, no leading '.' or '-') and an LF line ending (not CRLF)."
         files="$(sed -E 's/^.{64} .//' SHA256SUMS | sort)"
         dup="$(echo "${files}" | uniq -d)"
         [ -z "${dup}" ] || fail checksums-file "Duplicate SHA256SUMS entry" "${dup}" \
