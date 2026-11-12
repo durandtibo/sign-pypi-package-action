@@ -10,64 +10,70 @@ A composite GitHub Action that signs Python package distributions with Sigstore 
 along with their signatures, to a GitHub release.
 
 Point it at a job that already produced a `dist` artifact (wheel + sdist + `SHA256SUMS`), and it verifies
-the checksums, signs every distribution with Sigstore's keyless OIDC signing, uploads the signature
-bundles as a workflow artifact, and attaches everything to the release for the current tag.
+the checksums, signs every distribution with Sigstore's keyless OIDC signing, and attaches the
+distributions, their signature bundles and `SHA256SUMS` to the release for the tag.
 
 ## Why use it
 
 Attaching unsigned or tampered build artifacts to a release makes it hard for consumers to verify what
-they're installing actually came from your build. This action exists to make that verification possible
-and to catch problems before a release goes out with bad assets:
+they're installing actually came from your build. This action makes that verification possible and
+catches problems before a release goes out with bad assets:
 
-- Distribution files that don't match their recorded `SHA256SUMS` checksum are rejected.
-- Files present in `dist/` but not listed in `SHA256SUMS` (or vice versa) fail the job instead of being
-  silently skipped or silently signed.
+- `SHA256SUMS` must be well formed, and every listed file must match its checksum.
+- The artifact must contain `SHA256SUMS` and exactly the files it lists. An extra file (for example a
+  planted `*.sigstore.json`) fails the job instead of being signed or released.
 - Every distribution is signed with [Sigstore](https://www.sigstore.dev/), so consumers can verify
   provenance without you managing signing keys.
+- Release assets are never overwritten.
 
 ## How it works
 
-1. Downloads the `dist` artifact (produced by an earlier job in the same workflow run).
-2. Verifies that every `*.tar.gz`/`*.whl` file in it is listed in `dist/SHA256SUMS` and matches its
-   recorded checksum, failing closed on any mismatch or unlisted file.
-3. Signs the distributions with [Sigstore](https://www.sigstore.dev/) (keyless OIDC signing).
-4. Uploads the resulting `*.sigstore.json` bundles as a `signatures` artifact.
-5. Attaches the distributions, signature bundles, and `SHA256SUMS` to the GitHub release for the
-   current tag.
+Steps run in this order; each check that fails reports its id in the `failed-check` output.
+
+| Step | What it does                                                          | `failed-check`   |
+| ---- | --------------------------------------------------------------------- | ---------------- |
+| 0.2  | Resolves the release tag before anything is downloaded                | `tag`            |
+| 1.1  | Downloads the distribution artifact into `${RUNNER_TEMP}/dist`        | `unexpected`     |
+| 1.2  | Checks `SHA256SUMS`: exists, strict line format, plain names, no dups | `checksums-file` |
+| 1.3  | Checks the artifact holds exactly `SHA256SUMS` plus the listed files  | `file-set`       |
+| 1.4  | Verifies the checksums (`sha256sum`, or `shasum -a 256` on macOS)     | `checksum`       |
+| 2.1  | Signs the verified files with Sigstore (keyless OIDC)                 | `unexpected`     |
+| 3.1  | Attaches files, bundles and `SHA256SUMS` to the release with `gh`     | `release`        |
+
+The same verified file list is checked, signed and released: nothing is globbed after step 1.3.
 
 ## Requirements
 
-- A prior job/step must upload a `dist` artifact containing the built `*.tar.gz`/`*.whl` files plus a
-  `SHA256SUMS` file (`sha256sum -- *.tar.gz *.whl > SHA256SUMS`) generated at build time.
-- The calling job needs `id-token: write` (for Sigstore's keyless signing) and `contents: write` (to
-  create/attach release assets) permissions.
+- A prior job uploads an artifact (default name `dist`) with the built `*.tar.gz`/`*.whl` files plus a
+  `SHA256SUMS` file (`sha256sum -- *.tar.gz *.whl > SHA256SUMS`). File names may only contain letters,
+  digits, `.`, `_`, `+` and `-`, and must not start with `.` or `-`.
+- The tag must already exist. The action creates the release if it is missing and otherwise reuses it.
 
 ## Inputs
 
-| Name                 | Description                                                                                                                                                                             | Required | Default  |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- |
-| `tag-name`           | Tag/release to attach the signed assets to. Leave unset to use the tag that triggered the workflow (`github.ref_name`). Set explicitly when testing this action from a non-tag trigger. | No       | `""`     |
-| `dist-artifact-name` | Name of the "dist" artifact to download. Only needed when testing this action, so multiple candidate dist artifacts can coexist in one workflow run without colliding by name.          | No       | `"dist"` |
+| Name                 | Description                                                                                                  | Required | Default               |
+| -------------------- | ------------------------------------------------------------------------------------------------------------ | -------- | --------------------- |
+| `tag-name`           | Release tag. Leave unset to use the tag that triggered the run; fails if the run was not triggered by a tag. | No       | `""`                  |
+| `dist-artifact-name` | Name of the artifact with the distributions and `SHA256SUMS`.                                                | No       | `"dist"`              |
+| `github-token`       | Token used to create the release if needed and attach the assets. Needs `contents: write`.                   | No       | `${{ github.token }}` |
+
+## Outputs
+
+| Name           | Description                                                                                                                                |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `failed-check` | Id of the failed check (`tag`, `checksums-file`, `file-set`, `checksum`, `release`), `unexpected` for any other failure, empty on success. |
+
+A failure also writes an annotation and a job summary with the values involved and how to fix it.
+
+## Permissions
+
+The calling job needs `id-token: write` (Sigstore keyless signing) and `contents: write` (release
+assets), and nothing else. The action does not need `actions/checkout` and does not touch the workspace.
 
 ## Usage
 
-### Basic
-
-```yaml
-jobs:
-  sign:
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: durandtibo/sign-pypi-package-action@<ref>
-```
-
-### End-to-end release workflow
-
-Builds the package, then signs and attaches the distributions to the release triggered by the tag push:
+Pin the action to a full commit SHA with the version in a comment. Releases are immutable exact tags
+(`v0.1.0`, ...); there are no floating tags such as `v1`.
 
 ```yaml
 name: Release
@@ -77,12 +83,15 @@ on:
     tags:
       - "v*"
 
+permissions: {}
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-
+      - uses: actions/checkout@<sha> # <version>
       - name: Build package
         uses: durandtibo/build-pypi-package-action@239defb64fe09080292442db058bddd02f498eb3 # ratchet:durandtibo/build-pypi-package-action@v0.1.0
 
@@ -93,11 +102,31 @@ jobs:
       id-token: write
       contents: write
     steps:
-      - uses: actions/checkout@v7
-
       - name: Sign and release package
-        uses: durandtibo/sign-pypi-package-action@<ref>
+        uses: durandtibo/sign-pypi-package-action@<sha> # <version>
 ```
+
+## Security model
+
+The checksums only prove that the artifact was not changed between the build job and this job. They do
+not prove that the build itself was trustworthy: the Sigstore signature attests that this workflow, in
+this repository, signed the files. Steps 1.2 to 1.4 run before any signing or release call and fail
+closed. Inputs reach scripts through `env:` only, and the only secret used is `github.token`.
+
+## Verifying a release
+
+```bash
+uvx sigstore verify github --repository <owner>/<repo> <file>.whl
+```
+
+## Migration from `v0.0.1`
+
+- The `signatures` workflow artifact is gone; use `gh release download <tag> --pattern '*.sigstore.json'`.
+- Release assets are never overwritten: re-running on a tag that already has them fails with
+  `failed-check=release`. Delete the assets, then re-run.
+- The artifact must contain exactly `SHA256SUMS` and the files it lists; extra files now fail.
+- The `dist` artifact is downloaded to `${RUNNER_TEMP}/dist`, no longer to the workspace `dist/`.
+- `actions/checkout` is no longer needed in the signing job.
 
 ## License
 
