@@ -18,7 +18,7 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 - Do not edit `.make/`: it is a shared directory synced by `bot-sync-shared-makefile.yaml`.
 - Run `make format` and `make lint` before committing. Fix what they report instead of disabling
   rules.
-- The end-to-end tests (`test-local.yaml`, `test-stable.yaml`) need GitHub runners, OIDC and release
+- The end-to-end tests (`ci-action.yaml`, `nightly-test-released.yaml`) need GitHub runners, OIDC and release
   permissions, so they cannot be run locally; say so in the PR instead of claiming they pass.
 
 ## Git workflow
@@ -57,33 +57,38 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 
 - `ci.yaml`: entry point for pull requests, pushes to `main`, a weekly schedule and manual runs. It
   holds no steps, only jobs that call the reusable workflows below.
-  - `test-local.yaml`: end-to-end test of the action from this checkout (`uses: ./`), i.e. the
+  - `lib-get-test-matrix.yaml`: loads the OS (and Python version) lists from
+    `durandtibo/workflow-config-action` once and passes them down as `test-matrix`.
+  - `ci-format.yaml`: YAML, Makefile, shell and Markdown format checks plus `actionlint` (runs `make`
+    targets).
+  - `ci-action.yaml`: end-to-end test of the action from this checkout (`uses: ./`), i.e. the
     version not released yet. Covers Linux/macOS/Windows plus the checksum failure paths
     (`reject-tampered-checksums`, `reject-unlisted-file`, `reject-missing-checksums`).
-  - `test-stable.yaml`: the same tests against the last released tag, to catch regressions in what
-    users run today.
-- `format.yaml`: YAML, Makefile, shell and Markdown format checks (runs `make` targets).
+- `nightly.yaml`: scheduled entry point (and manual runs) calling `nightly-test-released.yaml`, the
+  same tests against the last released tag, to catch regressions in what users run today.
 - `ci-verify-workflows.yaml`: lints the workflow files themselves. It has its own triggers and is not
   called from `ci.yaml`, so it can be a required check.
-- `dependency-review.yml`: dependency review on pull requests.
+- `security-dependency-review.yaml`: dependency review on pull requests.
 - `bot-*.yaml`: scheduled automation (pin actions, sync `.make/`, cancel stale queued runs).
 - `.github/dependabot.yml` keeps pip, uv and GitHub Actions dependencies up to date.
 
+The workflow names and structure mirror `durandtibo/cancel-queued-runs-action`; keep them aligned.
+
 Conventions:
 
-- Every workflow has `permissions` at the workflow level (`{}` or read-only, never a write grant
-  there); give jobs the narrowest permissions they need, including jobs that call a reusable
+- Every workflow has `permissions: {}` at the workflow level; give jobs the narrowest permissions they need, including jobs that call a reusable
   workflow.
-- Reusable workflows also have `workflow_dispatch`, so they can be run alone.
+- Reusable workflows that need no input also have `workflow_dispatch`, so they can be run alone;
+  `ci-action.yaml` and `nightly-test-released.yaml` take the `test-matrix` input from their caller.
 - Put `make` targets in the steps rather than duplicating commands, so local runs and CI match.
 - Start each file with a comment saying what it does, and update it when the behaviour changes.
-- When a released tag is bumped, update the version referenced in `test-stable.yaml` and its header
+- When a released tag is bumped, update the version referenced in `nightly-test-released.yaml` and its header
   comment.
 
 ## Tests
 
-- Every behaviour of `action.yml` must be covered by an end-to-end job in `test-local.yaml` (and
-  `test-stable.yaml` where the released version supports it).
+- Every behaviour of `action.yml` must be covered by an end-to-end job in `ci-action.yaml` (and
+  `nightly-test-released.yaml` where the released version supports it).
 - Cover success and failure paths (tampered checksum, unlisted file, missing `SHA256SUMS`).
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
 - Every bug fix needs a regression test that fails without the fix.

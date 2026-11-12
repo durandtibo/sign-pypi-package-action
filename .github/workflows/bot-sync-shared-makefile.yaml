@@ -1,6 +1,6 @@
-# Pulls updates from the shared-makefiles repository (durandtibo/shared-makefiles)
-# into .make weekly, via the `update-subtree` target defined in .make/self.mk.
-# Opens a PR when there is something new.
+# Shared Makefile subtree sync workflow.
+# Pulls updates from the shared-makefiles repository into .make weekly.
+# Creates a pull request with the updates when there is something new.
 
 name: Sync shared Makefile (subtree)
 
@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read # actions/checkout only needs read; the app token grants write
+
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -46,9 +47,12 @@ jobs:
         run: |
           set -euo pipefail
           before="$(git rev-parse HEAD)"
-          make -f .make/self.mk update-subtree
+          # Run twice: the first call may update the `update-subtree` target itself,
+          # so the second call applies everything with the new version.
+          make update-subtree
+          make update-subtree
           after="$(git rev-parse HEAD)"
-          if [ "$before" != "$after" ]; then
+          if [ "$before" != "$after" ] && ! git diff --quiet "$before" "$after"; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
