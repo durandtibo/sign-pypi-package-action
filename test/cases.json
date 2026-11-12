@@ -1,0 +1,72 @@
+{
+  "accept": [
+    {
+      "name": "binary-mode-entry",
+      "stage": "sha256sum -b -- *.tar.gz *.whl > SHA256SUMS",
+      "expected": ""
+    }
+  ],
+  "reject": [
+    {
+      "name": "tampered-file",
+      "stage": "for f in *.tar.gz; do echo corrupted >> \"$f\"; done",
+      "expected": "checksum"
+    },
+    {
+      "name": "missing-sums",
+      "stage": "rm SHA256SUMS",
+      "expected": "checksums-file"
+    },
+    {
+      "name": "empty-sums",
+      "stage": ": > SHA256SUMS",
+      "expected": "checksums-file"
+    },
+    {
+      "name": "malformed-line",
+      "stage": "echo 'not-a-hash file.whl' >> SHA256SUMS",
+      "expected": "checksums-file"
+    },
+    {
+      "name": "path-traversal",
+      "stage": "printf '%064d  ../x.whl\\n' 0 >> SHA256SUMS",
+      "expected": "checksums-file"
+    },
+    {
+      "name": "duplicate-entry",
+      "stage": "grep '\\.whl$' SHA256SUMS >> SHA256SUMS.dup; cat SHA256SUMS.dup >> SHA256SUMS; rm SHA256SUMS.dup",
+      "expected": "checksums-file"
+    },
+    {
+      "name": "disallowed-extension",
+      "stage": "printf '%064d  evil.zip\\n' 0 >> SHA256SUMS",
+      "expected": "checksums-file"
+    },
+    {
+      "name": "unlisted-file",
+      "stage": "cp ./*.whl extra-0.0.0-py3-none-any.whl",
+      "expected": "file-set"
+    },
+    {
+      "name": "planted-bundle",
+      "stage": "echo '{}' > evil.sigstore.json",
+      "expected": "file-set"
+    },
+    {
+      "name": "subdirectory",
+      "stage": "mkdir sub && echo x > sub/file",
+      "expected": "file-set"
+    },
+    {
+      "name": "listed-file-absent",
+      "stage": "rm ./*.whl",
+      "expected": "file-set"
+    },
+    {
+      "name": "no-tag",
+      "stage": ":",
+      "expected": "tag",
+      "no_tag": true
+    }
+  ]
+}

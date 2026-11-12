@@ -13,6 +13,7 @@ assert_sigstore_valid() {
 }
 
 # assert_signatures_artifact_uploaded <run-id>
+# Only for nightly-test-released.yaml: the released v0.0.1 still uploads it.
 assert_signatures_artifact_uploaded() {
 	local run_id="$1"
 	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
@@ -56,6 +57,18 @@ assert_failure() {
 
 	test "${actual_outcome}" = "failure" || {
 		echo "::error::expected ${label} to fail, got outcome=${actual_outcome}"
+		exit 1
+	}
+}
+
+# assert_failed_check <label> <expected-id> <actual-id>
+# The action's failed-check output is empty on success; tests assert the id,
+# never the message text.
+assert_failed_check() {
+	local label="$1" expected="$2" actual="$3"
+
+	test "${actual}" = "${expected}" || {
+		echo "::error::${label}: expected failed-check '${expected}', got '${actual}'"
 		exit 1
 	}
 }

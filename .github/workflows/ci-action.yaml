@@ -1,10 +1,10 @@
 # Tests this composite action end-to-end, across Linux/macOS/Windows: it
 # creates a throwaway GitHub release/tag, signs a fixture package's
 # distributions with Sigstore, and attaches them to that release, then
-# deletes the release/tag again. Also tests its checksum-verification
-# failure paths (reject-tampered-checksums, reject-unlisted-file,
-# reject-missing-checksums), which aren't OS-dependent so only run on
-# ubuntu-latest.
+# deletes the release/tag again. Also runs every row of test/cases.json
+# (accept and reject jobs): each stages a modified copy of the built dist,
+# runs the action on it and asserts the exact failed-check id. These checks
+# aren't OS-dependent so only run on ubuntu-latest.
 
 name: Test Action
 on:
@@ -27,6 +27,9 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      accept: ${{ steps.cases.outputs.accept }}
+      reject: ${{ steps.cases.outputs.reject }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
@@ -42,6 +45,12 @@ jobs:
 
       - name: Generate checksums
         run: cd dist && sha256sum -- *.tar.gz *.whl > SHA256SUMS
+
+      - name: Load test cases
+        id: cases
+        run: |
+          echo "accept=$(jq -c .accept test/cases.json)" >> "$GITHUB_OUTPUT"
+          echo "reject=$(jq -c .reject test/cases.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
@@ -62,7 +71,6 @@ jobs:
     permissions:
       id-token: write # Sigstore OIDC keyless signing
       contents: write # create/delete the throwaway release and attach assets
-      actions: read # list this run's artifacts to assert "signatures" was uploaded
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
@@ -98,16 +106,7 @@ jobs:
         shell: bash
         run: |
           source scripts/test-helper.sh
-          assert_sigstore_valid "${{ github.repository }}" dist/*.tar.gz dist/*.whl
-
-      - name: Assert signatures artifact was uploaded
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          source scripts/test-helper.sh
-          assert_signatures_artifact_uploaded "${{ github.run_id }}"
+          assert_sigstore_valid "${{ github.repository }}" "${RUNNER_TEMP}"/dist/*.tar.gz "${RUNNER_TEMP}"/dist/*.whl
 
       - name: Assert all expected assets were attached to the release
         shell: bash
@@ -127,44 +126,116 @@ jobs:
           gh release delete "${{ steps.release.outputs.tag }}" \
             --repo "${{ github.repository }}" --yes --cleanup-tag || true
 
-  reject-tampered-checksums:
-    # sign must fail closed if the downloaded "dist" artifact doesn't match
-    # the checksums recorded at build time, before signing anything or
-    # touching a release. Needs no id-token/contents: write permissions since
-    # it never reaches those steps.
-    permissions:
-      contents: read
+  accept:
+    # Rows of test/cases.json that the action must accept: it runs to the end
+    # (throwaway release included) and reports no failed check.
+    needs: [build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.build.outputs.accept) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      id-token: write # Sigstore OIDC keyless signing
+      contents: write # create/delete the throwaway release and attach assets
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
 
-      - name: Stage fixture package at repo root
-        run: cp -r test/fixtures/pkg/. .
+      - name: Download base distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # ratchet:actions/download-artifact@v8.0.2
+        with:
+          name: dist
+          path: case-dist
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # ratchet:astral-sh/setup-uv@v10.3.3
+      - name: Stage case
+        shell: bash
+        env:
+          STAGE: ${{ matrix.stage }}
+        run: cd case-dist && bash -euo pipefail -c "${STAGE}"
 
-      - name: Build package
-        run: uv build
-
-      - name: Generate checksums
-        run: cd dist && sha256sum -- *.tar.gz *.whl > SHA256SUMS
-
-      - name: Tamper with a built distribution
-        run: echo "corrupted" >> dist/*.tar.gz
-
-      - name: Upload dist artifact under a name unique to this job
-        # Must not be "dist": the build/reject-* jobs in this workflow (and
-        # the other jobs of the same run) each upload a
-        # dist artifact, and artifacts are scoped to the whole run, not the
-        # job. A shared name makes download-artifact's by-name lookup
-        # ambiguous, so each scenario gets its own name.
+      - name: Upload staged distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
-          name: dist-tampered-checksums-local
-          path: dist/
+          name: dist-${{ matrix.name }}
+          path: case-dist/
+          retention-days: 1
+
+      - name: Create throwaway release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ci-accept-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          gh release create "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Test run ${TAG} (throwaway, will be deleted)" \
+            --notes "Created by the CI workflow, safe to ignore/delete." \
+            --target "${GITHUB_SHA}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Run sign action
+        id: sign
+        continue-on-error: true
+        uses: ./
+        with:
+          tag-name: ${{ steps.release.outputs.tag }}
+          dist-artifact-name: dist-${{ matrix.name }}
+
+      - name: Assert no check failed
+        shell: bash
+        env:
+          LABEL: ${{ matrix.name }}
+          EXPECTED: ${{ matrix.expected }}
+          ACTUAL: ${{ steps.sign.outputs.failed-check }}
+        run: |
+          source scripts/test-helper.sh
+          assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
+
+      - name: Delete throwaway release and tag
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag || true
+
+  reject:
+    # Rows of test/cases.json that the action must reject with the expected
+    # failed-check id, before signing or touching a release. Needs no
+    # id-token/contents: write permissions since it never reaches those steps.
+    needs: [build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.build.outputs.reject) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Download base distributions
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # ratchet:actions/download-artifact@v8.0.2
+        with:
+          name: dist
+          path: case-dist
+
+      - name: Stage case
+        shell: bash
+        env:
+          STAGE: ${{ matrix.stage }}
+        run: cd case-dist && bash -euo pipefail -c "${STAGE}"
+
+      - name: Upload staged distributions
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
+        with:
+          name: dist-${{ matrix.name }}
+          path: case-dist/
           retention-days: 1
 
       - name: Run sign action
@@ -172,108 +243,16 @@ jobs:
         continue-on-error: true
         uses: ./
         with:
-          tag-name: ci-sign-checksum-test-${{ github.run_id }}-${{ github.run_attempt }}
-          dist-artifact-name: dist-tampered-checksums-local
+          # no_tag rows leave tag-name unset: the run is not a tag push.
+          tag-name: ${{ !matrix.no_tag && format('ci-reject-{0}-{1}-{2}', matrix.name, github.run_id, github.run_attempt) || '' }}
+          dist-artifact-name: dist-${{ matrix.name }}
 
-      - name: Assert sign action failed
+      - name: Assert the expected check failed
         shell: bash
+        env:
+          LABEL: ${{ matrix.name }}
+          EXPECTED: ${{ matrix.expected }}
+          ACTUAL: ${{ steps.sign.outputs.failed-check }}
         run: |
           source scripts/test-helper.sh
-          assert_failure "sign (tampered checksums)" "${{ steps.sign.outcome }}"
-
-  reject-unlisted-file:
-    # sign must also fail closed if the downloaded "dist" artifact contains
-    # a distribution file that isn't listed in SHA256SUMS at all (as
-    # opposed to reject-tampered-checksums, which covers a listed file
-    # whose contents changed). Without this check, an unlisted file would
-    # skip checksum verification entirely yet still get signed and
-    # released.
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
-
-      - name: Stage fixture package at repo root
-        run: cp -r test/fixtures/pkg/. .
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # ratchet:astral-sh/setup-uv@v10.3.3
-
-      - name: Build package
-        run: uv build
-
-      - name: Generate checksums
-        run: cd dist && sha256sum -- *.tar.gz *.whl > SHA256SUMS
-
-      - name: Add an unlisted distribution file
-        run: cp dist/*.whl dist/extra-unlisted-0.0.0-py3-none-any.whl
-
-      - name: Upload dist artifact under a name unique to this job
-        # See the equivalent step in reject-tampered-checksums for why this
-        # can't be "dist".
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
-        with:
-          name: dist-unlisted-file-local
-          path: dist/
-          retention-days: 1
-
-      - name: Run sign action
-        id: sign
-        continue-on-error: true
-        uses: ./
-        with:
-          tag-name: ci-sign-unlisted-file-test-${{ github.run_id }}-${{ github.run_attempt }}
-          dist-artifact-name: dist-unlisted-file-local
-
-      - name: Assert sign action failed
-        shell: bash
-        run: |
-          source scripts/test-helper.sh
-          assert_failure "sign (unlisted file)" "${{ steps.sign.outcome }}"
-
-  reject-missing-checksums:
-    # sign must fail closed if the downloaded "dist" artifact has no
-    # SHA256SUMS file at all, rather than e.g. treating an empty/absent
-    # checksum list as "nothing to verify" and signing unverified files.
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
-
-      - name: Stage fixture package at repo root
-        run: cp -r test/fixtures/pkg/. .
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # ratchet:astral-sh/setup-uv@v10.3.3
-
-      - name: Build package
-        run: uv build
-
-      - name: Upload dist artifact without SHA256SUMS
-        # See the equivalent step in reject-tampered-checksums for why this
-        # can't be "dist".
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
-        with:
-          name: dist-missing-checksums-local
-          path: dist/
-          retention-days: 1
-
-      - name: Run sign action
-        id: sign
-        continue-on-error: true
-        uses: ./
-        with:
-          tag-name: ci-sign-missing-checksums-test-${{ github.run_id }}-${{ github.run_attempt }}
-          dist-artifact-name: dist-missing-checksums-local
-
-      - name: Assert sign action failed
-        shell: bash
-        run: |
-          source scripts/test-helper.sh
-          assert_failure "sign (missing SHA256SUMS)" "${{ steps.sign.outcome }}"
+          assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
