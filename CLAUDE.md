@@ -59,7 +59,7 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
   holds no steps, only jobs that call the reusable workflows below.
   - `lib-get-test-matrix.yaml`: loads the OS (and Python version) lists from
     `durandtibo/workflow-config-action` once and passes them down as `test-matrix`.
-  - `ci-format.yaml`: YAML, Makefile, shell and Markdown format checks plus `actionlint` (runs `make`
+  - `ci-format.yaml`: YAML, Makefile, shell and Markdown format checks plus shell lint and `actionlint` (runs `make`
     targets).
   - `ci-action.yaml`: end-to-end test of the action from this checkout (`uses: ./`), i.e. the
     version not released yet. Covers Linux/macOS/Windows plus the checksum failure paths
@@ -69,7 +69,8 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 - `ci-verify-workflows.yaml`: lints the workflow files themselves. It has its own triggers and is not
   called from `ci.yaml`, so it can be a required check.
 - `security-dependency-review.yaml`: dependency review on pull requests.
-- `bot-*.yaml`: scheduled automation (pin actions, sync `.make/`, cancel stale queued runs).
+- `bot-*.yaml`: scheduled automation (pin actions, sync `.make/`, format files, cancel stale queued runs).
+- `security-scorecard.yaml`: OSSF Scorecard analysis (needs the `TIBOT_*` GitHub App secrets).
 - `.github/dependabot.yml` keeps pip, uv and GitHub Actions dependencies up to date.
 
 The workflow names and structure mirror `durandtibo/cancel-queued-runs-action`; keep them aligned.
