@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Shared assertions for the CI workflows, so test-local.yaml (and a future
-# test-stable.yaml once a release is tagged) only differ in which sign
+# Shared assertions for the CI workflows, so ci-action.yaml (and a future
+# nightly-test-released.yaml once a release is tagged) only differ in which sign
 # action ref they exercise (local checkout vs. a released tag), not in
 # verification logic.
 set -euo pipefail
@@ -34,7 +34,7 @@ assert_release_assets() {
 
 # delete_dist_artifacts <repository> <run-id>
 # Deletes every "dist"-named artifact already uploaded in this run. Needed
-# because test-stable.yaml's checksum-rejection jobs run the pinned stable
+# because nightly-test-released.yaml's checksum-rejection jobs run the pinned stable
 # action, which always downloads an artifact literally named "dist" (it
 # predates the dist-artifact-name input); those jobs are serialized with
 # "needs" and each must clear out the previous job's "dist" artifact before

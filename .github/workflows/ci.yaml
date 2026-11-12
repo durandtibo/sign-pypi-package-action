@@ -1,31 +1,51 @@
+# Main CI workflow that orchestrates all quality checks and tests.
+# Runs on pull requests, pushes to main, a weekly schedule, and manual dispatch.
+# It tests the current repository code, including the action that is not
+# released yet. The latest released action is tested by nightly.yaml.
+#
+# Deliberately NOT called from here, with its own trigger:
+#   - ci-verify-workflows.yaml: lints .github/workflows/* itself.
+#
+# Permissions are set at the job level, not the workflow level.
+#
+# The individual check jobs below call out to per-check reusable workflows
+# (ci-format.yaml, ci-action.yaml) instead of inlining their steps here, so each
+# check can still be run on its own.
+
 name: CI
 on:
-  push:
-    branches: [main]
   pull_request:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: "0 6 * * 1"
+    - cron: "0 6 * * 1" # Run weekly on Monday at 6:00 AM UTC to catch issues from external changes
+  workflow_dispatch: # to trigger manually
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  test-local:
+  # Load the shared OS matrix from the default config of
+  # durandtibo/workflow-config-action once, and pass it down to every job
+  # below that needs it.
+  get-matrix:
+    uses: ./.github/workflows/lib-get-test-matrix.yaml
     permissions:
-      contents: write
-      id-token: write
-      actions: read
-    uses: ./.github/workflows/test-local.yaml
-  test-stable:
+      contents: read
+
+  # Verify formatting and linting of the repository files
+  format:
+    uses: ./.github/workflows/ci-format.yaml
     permissions:
-      contents: write
-      id-token: write
-      # write: reject-* jobs delete stale "dist" artifacts between each
-      # other to avoid by-name download ambiguity (see test-stable.yaml).
-      actions: write
-    uses: ./.github/workflows/test-stable.yaml
+      contents: read
+
+  # Test the action from the current repository code (not released yet) on multiple OS
+  action:
+    needs: get-matrix
+    uses: ./.github/workflows/ci-action.yaml
+    with:
+      test-matrix: ${{ needs.get-matrix.outputs.test_matrix }}
+    permissions:
+      contents: write # create/delete the throwaway release and attach assets
+      id-token: write # Sigstore OIDC keyless signing
+      actions: read # list this run's artifacts to assert "signatures" was uploaded

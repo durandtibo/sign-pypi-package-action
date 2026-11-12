@@ -1,36 +1,30 @@
-# Tests the last stable release (durandtibo/sign-pypi-package-action@v0.0.1)
-# end-to-end, across Linux/macOS/Windows: it creates a throwaway GitHub
-# release/tag, signs a fixture package's distributions with Sigstore, and
-# attaches them to that release, then deletes the release/tag again. Also
-# tests its checksum-verification failure paths (reject-tampered-checksums,
-# reject-unlisted-file, reject-missing-checksums), which aren't OS-dependent
-# so only run on ubuntu-latest.
+# Tests this composite action end-to-end, across Linux/macOS/Windows: it
+# creates a throwaway GitHub release/tag, signs a fixture package's
+# distributions with Sigstore, and attaches them to that release, then
+# deletes the release/tag again. Also tests its checksum-verification
+# failure paths (reject-tampered-checksums, reject-unlisted-file,
+# reject-missing-checksums), which aren't OS-dependent so only run on
+# ubuntu-latest.
 
-name: Test Stable Action
-
+name: Test Action
 on:
   workflow_call:
-  workflow_dispatch: # to trigger manually
+    inputs:
+      test-matrix:
+        description: "JSON test matrix from lib-get-test-matrix.yaml, loaded once by the caller"
+        required: true
+        type: string
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  config:
-    runs-on: ubuntu-slim
-    timeout-minutes: 2
-    outputs:
-      os_all: ${{ steps.cfg.outputs.os_all }}
-    steps:
-      - name: Load workflow config
-        uses: durandtibo/workflow-config-action@8c406999ac8ac3cafe656c263759d8ddea3a4edb # ratchet:durandtibo/workflow-config-action@v0.2
-        id: cfg
-
   build:
     # Signing isn't OS-dependent, so a single build here just produces the
     # one "dist" artifact this action's tests consume. Uses a plain
     # "uv build" rather than the build-pypi-package-action, to keep this
     # repo's tests independent of that other action.
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -57,11 +51,12 @@ jobs:
           retention-days: 1
 
   sign:
-    needs: [config, build]
+    needs: [build]
     strategy:
+      max-parallel: 8
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(needs.config.outputs.os_all) }}
+        os: ${{ fromJson(inputs.test-matrix).os_matrix }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     permissions:
@@ -81,7 +76,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="ci-sign-stable-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          tag="ci-sign-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
           gh release create "$tag" \
             --repo "${{ github.repository }}" \
             --title "Test run $tag (throwaway, will be deleted)" \
@@ -90,7 +85,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Run sign action
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        uses: ./
         with:
           tag-name: ${{ steps.release.outputs.tag }}
 
@@ -135,28 +130,15 @@ jobs:
   reject-tampered-checksums:
     # sign must fail closed if the downloaded "dist" artifact doesn't match
     # the checksums recorded at build time, before signing anything or
-    # touching a release. The pinned stable action always downloads an
-    # artifact literally named "dist" (it predates the dist-artifact-name
-    # input), so this job must not run until the "sign" job's matrix has
-    # finished downloading the "build" job's "dist" artifact, and must
-    # delete it first — artifacts are scoped to the whole run, not the job,
-    # so two "dist" artifacts coexisting would make download-artifact's
-    # by-name lookup ambiguous.
-    needs: [sign]
+    # touching a release. Needs no id-token/contents: write permissions since
+    # it never reaches those steps.
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      actions: write # delete the "build" job's "dist" artifact before reusing the name
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
-
-      - name: Delete previous dist artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          source scripts/test-helper.sh
-          delete_dist_artifacts "${{ github.repository }}" "${{ github.run_id }}"
 
       - name: Stage fixture package at repo root
         run: cp -r test/fixtures/pkg/. .
@@ -173,19 +155,25 @@ jobs:
       - name: Tamper with a built distribution
         run: echo "corrupted" >> dist/*.tar.gz
 
-      - name: Upload dist artifact under the name sign expects
+      - name: Upload dist artifact under a name unique to this job
+        # Must not be "dist": the build/reject-* jobs in this workflow (and
+        # the other jobs of the same run) each upload a
+        # dist artifact, and artifacts are scoped to the whole run, not the
+        # job. A shared name makes download-artifact's by-name lookup
+        # ambiguous, so each scenario gets its own name.
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
-          name: dist
+          name: dist-tampered-checksums-local
           path: dist/
           retention-days: 1
 
       - name: Run sign action
         id: sign
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        uses: ./
         with:
-          tag-name: ci-sign-stable-checksum-test-${{ github.run_id }}-${{ github.run_attempt }}
+          tag-name: ci-sign-checksum-test-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-tampered-checksums-local
 
       - name: Assert sign action failed
         shell: bash
@@ -199,23 +187,14 @@ jobs:
     # opposed to reject-tampered-checksums, which covers a listed file
     # whose contents changed). Without this check, an unlisted file would
     # skip checksum verification entirely yet still get signed and
-    # released. Serialized after reject-tampered-checksums for the same
-    # "dist"-name-collision reason explained there.
-    needs: [reject-tampered-checksums]
+    # released.
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      actions: write # delete reject-tampered-checksums' "dist" artifact before reusing the name
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
-
-      - name: Delete previous dist artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          source scripts/test-helper.sh
-          delete_dist_artifacts "${{ github.repository }}" "${{ github.run_id }}"
 
       - name: Stage fixture package at repo root
         run: cp -r test/fixtures/pkg/. .
@@ -232,19 +211,22 @@ jobs:
       - name: Add an unlisted distribution file
         run: cp dist/*.whl dist/extra-unlisted-0.0.0-py3-none-any.whl
 
-      - name: Upload dist artifact under the name sign expects
+      - name: Upload dist artifact under a name unique to this job
+        # See the equivalent step in reject-tampered-checksums for why this
+        # can't be "dist".
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
-          name: dist
+          name: dist-unlisted-file-local
           path: dist/
           retention-days: 1
 
       - name: Run sign action
         id: sign
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        uses: ./
         with:
-          tag-name: ci-sign-stable-unlisted-file-test-${{ github.run_id }}-${{ github.run_attempt }}
+          tag-name: ci-sign-unlisted-file-test-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-unlisted-file-local
 
       - name: Assert sign action failed
         shell: bash
@@ -256,23 +238,13 @@ jobs:
     # sign must fail closed if the downloaded "dist" artifact has no
     # SHA256SUMS file at all, rather than e.g. treating an empty/absent
     # checksum list as "nothing to verify" and signing unverified files.
-    # Serialized after reject-unlisted-file for the same "dist"-name-
-    # collision reason explained on reject-tampered-checksums.
-    needs: [reject-unlisted-file]
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      actions: write # delete reject-unlisted-file's "dist" artifact before reusing the name
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
-
-      - name: Delete previous dist artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          source scripts/test-helper.sh
-          delete_dist_artifacts "${{ github.repository }}" "${{ github.run_id }}"
 
       - name: Stage fixture package at repo root
         run: cp -r test/fixtures/pkg/. .
@@ -284,18 +256,21 @@ jobs:
         run: uv build
 
       - name: Upload dist artifact without SHA256SUMS
+        # See the equivalent step in reject-tampered-checksums for why this
+        # can't be "dist".
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
-          name: dist
+          name: dist-missing-checksums-local
           path: dist/
           retention-days: 1
 
       - name: Run sign action
         id: sign
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        uses: ./
         with:
-          tag-name: ci-sign-stable-missing-checksums-test-${{ github.run_id }}-${{ github.run_attempt }}
+          tag-name: ci-sign-missing-checksums-test-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-missing-checksums-local
 
       - name: Assert sign action failed
         shell: bash
