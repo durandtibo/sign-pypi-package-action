@@ -30,17 +30,22 @@ catches problems before a release goes out with bad assets:
 
 Steps run in this order; each check that fails reports its id in the `failed-check` output.
 
-| Step | What it does                                                          | `failed-check`   |
-| ---- | --------------------------------------------------------------------- | ---------------- |
-| 0.2  | Resolves the release tag before anything is downloaded                | `tag`            |
-| 1.1  | Downloads the distribution artifact into `${RUNNER_TEMP}/dist`        | `unexpected`     |
-| 1.2  | Checks `SHA256SUMS`: exists, strict line format, plain names, no dups | `checksums-file` |
-| 1.3  | Checks the artifact holds exactly `SHA256SUMS` plus the listed files  | `file-set`       |
-| 1.4  | Verifies the checksums (`sha256sum`, or `shasum -a 256` on macOS)     | `checksum`       |
-| 2.1  | Signs the verified files with Sigstore (keyless OIDC)                 | `unexpected`     |
-| 3.1  | Attaches files, bundles and `SHA256SUMS` to the release with `gh`     | `release`        |
+| Step | What it does                                                                | `failed-check`   |
+| ---- | --------------------------------------------------------------------------- | ---------------- |
+| 0.2  | Resolves the release tag before anything is downloaded                      | `tag`            |
+| 1.1  | Downloads the distribution artifact into `${RUNNER_TEMP}/sign-pypi-package` | `unexpected`     |
+| 1.2  | Checks `SHA256SUMS`: exists, strict line format, plain names, no dups       | `checksums-file` |
+| 1.3  | Checks the artifact holds exactly `SHA256SUMS` plus the listed files        | `file-set`       |
+| 1.4  | Verifies the checksums (`sha256sum`, or `shasum -a 256` on macOS)           | `checksum`       |
+| 2.1  | Signs the verified files with Sigstore (keyless OIDC)                       | `unexpected`     |
+| 3.1  | Attaches files, bundles and `SHA256SUMS` to the release with `gh`           | `release`        |
 
 The same verified file list is checked, signed and released: nothing is globbed after step 1.3.
+
+## Running it several times
+
+The action can run more than once in a job (for example for two packages), each time with its own
+artifact. It removes its work directory first, so a run never sees the files of the previous one.
 
 ## Requirements
 
@@ -125,7 +130,7 @@ uvx sigstore verify github --repository <owner>/<repo> <file>.whl
 - Release assets are never overwritten: re-running on a tag that already has them fails with
   `failed-check=release`. Delete the assets, then re-run.
 - The artifact must contain exactly `SHA256SUMS` and the files it lists; extra files now fail.
-- The `dist` artifact is downloaded to `${RUNNER_TEMP}/dist`, no longer to the workspace `dist/`.
+- The `dist` artifact is downloaded to `${RUNNER_TEMP}/sign-pypi-package`, no longer to the workspace `dist/`.
 - `actions/checkout` is no longer needed in the signing job.
 
 ## License
