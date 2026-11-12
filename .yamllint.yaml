@@ -1,0 +1,18 @@
+# yamllint configuration, tuned for prettier-formatted GitHub Actions files.
+extends: default
+
+ignore: |
+  .make/
+
+rules:
+  # Workflow and action files embed shell scripts and long action refs with
+  # ratchet comments; prettier does not wrap them.
+  line-length: disable
+  # GitHub files do not start with "---".
+  document-start: disable
+  # "on:" is a key, not a boolean.
+  truthy:
+    check-keys: false
+  # prettier writes one space before an inline comment.
+  comments:
+    min-spaces-from-content: 1
