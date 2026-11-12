@@ -193,15 +193,26 @@ runs:
         source "${RUNNER_TEMP}/fail.sh"
         DIST="${DIST//\\//}" # forward slashes on Windows too
         cd "${DIST}" || exit
-        gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 ||
-          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --title "${TAG}" --notes "" ||
-          fail release "Cannot create release ${TAG}" "gh release create failed for tag ${TAG}." \
-            "Push the tag first and check that the token has contents: write."
+        # A release that this run creates stays a draft until all assets are attached, so a failure
+        # never leaves a public release that looks complete. A release that already exists is only
+        # added to. Never --cleanup-tag: the tag existed before this run.
+        created=0
+        if ! gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft --verify-tag --title "${TAG}" --notes "" ||
+            fail release "Cannot create release ${TAG}" "gh release create failed for tag ${TAG}." \
+              "Push the tag first and check that the token has contents: write."
+          created=1
+        fi
         # Word splitting is intended: names are restricted to plain file names by step 1.2.
         # shellcheck disable=SC2086,SC2046
-        gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" SHA256SUMS SHA256SUMS.sigstore.json ${FILES} $(printf '%s.sigstore.json ' ${FILES}) ||
-          fail release "Cannot attach assets to ${TAG}" "gh release upload failed; an asset may already exist (assets are never overwritten)." \
-            "Delete the partial assets of ${TAG}, then re-run."
+        if gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" SHA256SUMS SHA256SUMS.sigstore.json ${FILES} $(printf '%s.sigstore.json ' ${FILES}) &&
+          { [ "${created}" = 0 ] || gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false; }; then
+          :
+        else
+          if [ "${created}" = 1 ]; then gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes || true; fi
+          fail release "Cannot attach assets to ${TAG}" "gh failed to upload or publish; an asset may already exist (assets are never overwritten)." \
+            "Fix the cause and re-run. A release created by this run was removed; an existing one may have partial assets: delete them first."
+        fi
 
     - name: 4.1 Write job summary
       shell: bash

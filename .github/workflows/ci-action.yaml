@@ -316,6 +316,18 @@ jobs:
             assert_failed_check "${LABEL}" "${EXPECTED}" "${last}"
           fi
 
+      - name: Assert the release created by the action is published
+        # Only the action created it, as a draft, and published it after the upload.
+        if: ${{ matrix.tag == 'unreleased' && matrix.expected == '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.setup.outputs.tag }}
+        run: |
+          source scripts/test-helper.sh
+          assert_release_published "${TAG}"
+          assert_release_assets "${TAG}" true
+
       - name: Assert a rejected run attached nothing
         # A single rejected run must stop before signing and releasing, so its
         # release (if any) has no assets. With runs: 2 the first run attaches some.
