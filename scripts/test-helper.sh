@@ -59,3 +59,15 @@ assert_failure() {
 		exit 1
 	}
 }
+
+# assert_failed_check <label> <expected-id> <actual-id>
+# The action's failed-check output is empty on success; tests assert the id,
+# never the message text.
+assert_failed_check() {
+	local label="$1" expected="$2" actual="$3"
+
+	test "${actual}" = "${expected}" || {
+		echo "::error::${label}: expected failed-check '${expected}', got '${actual}'"
+		exit 1
+	}
+}
