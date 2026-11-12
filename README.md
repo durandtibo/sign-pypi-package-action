@@ -22,25 +22,25 @@ catches problems before a release goes out with bad assets:
 - `SHA256SUMS` must be well formed, and every listed file must match its checksum.
 - The artifact must contain `SHA256SUMS` and exactly the files it lists. An extra file (for example a
   planted `*.sigstore.json`) fails the job instead of being signed or released.
-- Every distribution is signed with [Sigstore](https://www.sigstore.dev/), so consumers can verify
-  provenance without you managing signing keys.
+- Every distribution and `SHA256SUMS` itself are signed with [Sigstore](https://www.sigstore.dev/), so
+  consumers can verify provenance, also of the checksums file, without you managing signing keys.
 - Release assets are never overwritten.
 
 ## How it works
 
 Steps run in this order; each check that fails reports its id in the `failed-check` output.
 
-| Step | What it does                                                                | `failed-check`   |
-| ---- | --------------------------------------------------------------------------- | ---------------- |
-| 0.2  | Resolves the release tag before anything is downloaded                      | `tag`            |
-| 1.1  | Downloads the distribution artifact into `${RUNNER_TEMP}/sign-pypi-package` | `unexpected`     |
-| 1.2  | Checks `SHA256SUMS`: exists, strict line format, plain names, no dups       | `checksums-file` |
-| 1.3  | Checks the artifact holds exactly `SHA256SUMS` plus the listed files        | `file-set`       |
-| 1.4  | Verifies the checksums (`sha256sum`, or `shasum -a 256` on macOS)           | `checksum`       |
-| 2.1  | Checks that the job can get an OIDC token (`id-token: write`)               | `permissions`    |
-| 2.2  | Signs the verified files with Sigstore (keyless OIDC)                       | `unexpected`     |
-| 2.3  | Checks that every signed file has a non-empty `.sigstore.json` bundle       | `bundle`         |
-| 3.1  | Attaches files, bundles and `SHA256SUMS` to the release with `gh`           | `release`        |
+| Step | What it does                                                                  | `failed-check`   |
+| ---- | ----------------------------------------------------------------------------- | ---------------- |
+| 0.2  | Resolves the release tag before anything is downloaded                        | `tag`            |
+| 1.1  | Downloads the distribution artifact into `${RUNNER_TEMP}/sign-pypi-package`   | `unexpected`     |
+| 1.2  | Checks `SHA256SUMS`: exists, strict line format, plain names, no dups         | `checksums-file` |
+| 1.3  | Checks the artifact holds exactly `SHA256SUMS` plus the listed files          | `file-set`       |
+| 1.4  | Verifies the checksums (`sha256sum`, or `shasum -a 256` on macOS)             | `checksum`       |
+| 2.1  | Checks that the job can get an OIDC token (`id-token: write`)                 | `permissions`    |
+| 2.2  | Signs the verified files and `SHA256SUMS` with Sigstore (keyless OIDC)        | `unexpected`     |
+| 2.3  | Checks that every signed file, `SHA256SUMS` included, has a bundle            | `bundle`         |
+| 3.1  | Attaches files, bundles, `SHA256SUMS` and its bundle to the release with `gh` | `release`        |
 
 The same verified file list is checked, signed and released: nothing is globbed after step 1.3.
 
@@ -125,10 +125,12 @@ and fenced in the job summary.
 
 ```bash
 uvx sigstore verify github --repository <owner>/<repo> <file>.whl
+uvx sigstore verify github --repository <owner>/<repo> SHA256SUMS # then: sha256sum -c SHA256SUMS
 ```
 
 ## Migration from `v0.0.1`
 
+- `SHA256SUMS` is signed too: the release gets one more asset, `SHA256SUMS.sigstore.json`.
 - The `signatures` workflow artifact is gone; use `gh release download <tag> --pattern '*.sigstore.json'`.
 - Release assets are never overwritten: re-running on a tag that already has them fails with
   `failed-check=release`. Delete the assets, then re-run.

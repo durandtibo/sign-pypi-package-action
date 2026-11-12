@@ -141,19 +141,25 @@ jobs:
         # downloads to RUNNER_TEMP/sign-pypi-package, the released one to the workspace.
         shell: bash
         env:
+          RELEASED: ${{ inputs.released }}
           DIST_DIR: ${{ inputs.released && 'dist' || format('{0}/sign-pypi-package', runner.temp) }}
         run: |
           source scripts/test-helper.sh
           assert_sigstore_valid "${GITHUB_REPOSITORY}" "${DIST_DIR}"/*.tar.gz "${DIST_DIR}"/*.whl
+          # The checksums file is signed too, except by the released v0.0.1.
+          if [ "${RELEASED}" != "true" ]; then
+            assert_sigstore_valid "${GITHUB_REPOSITORY}" "${DIST_DIR}/SHA256SUMS"
+          fi
 
       - name: Assert all expected assets were attached to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
+          SUMS_BUNDLE: ${{ !inputs.released }}
         run: |
           source scripts/test-helper.sh
-          assert_release_assets "${TAG}"
+          assert_release_assets "${TAG}" "${SUMS_BUNDLE}"
 
       - name: Delete throwaway release and tag
         if: always()

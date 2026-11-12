@@ -34,12 +34,16 @@ assert_sigstore_valid() {
 	uvx sigstore verify github --repository "${repository}" "$@"
 }
 
-# assert_release_assets <tag>
+# assert_release_assets <tag> <with-sums-bundle: true|false>
+# The release holds the distributions, a bundle per file and SHA256SUMS. Since the
+# checksums file is signed too, SHA256SUMS.sigstore.json is expected unless the
+# last released tag (which does not sign it) is tested.
 assert_release_assets() {
-	local tag="$1"
-	local assets
+	local tag="$1" sums_bundle="$2" assets pattern patterns
+	patterns=('\.tar\.gz$' '\.whl$' '\.sigstore\.json$' '^SHA256SUMS$')
+	if [ "${sums_bundle}" = "true" ]; then patterns+=('^SHA256SUMS\.sigstore\.json$'); fi
 	assets="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')"
-	for pattern in '\.tar\.gz$' '\.whl$' '\.sigstore\.json$' '^SHA256SUMS$'; do
+	for pattern in "${patterns[@]}"; do
 		echo "${assets}" | grep -qE "${pattern}" || {
 			echo "::error::no release asset matching '${pattern}', got: ${assets}"
 			exit 1

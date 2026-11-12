@@ -110,7 +110,8 @@ runs:
           "List every distribution file exactly once."
         {
           echo "files=$(echo "${files}" | tr '\n' ' ')"
-          echo "inputs=$(echo "${files}" | sed "s|^|${DIST}/|" | tr '\n' ' ')"
+          # SHA256SUMS is signed too: it is the contract of the release.
+          echo "inputs=${DIST}/SHA256SUMS $(echo "${files}" | sed "s|^|${DIST}/|" | tr '\n' ' ')"
         } >>"${GITHUB_OUTPUT}"
 
     - name: 1.3 Check distribution file set
@@ -176,7 +177,7 @@ runs:
         cd "${DIST}" || exit
         # Word splitting is intended: names are restricted to plain file names by step 1.2.
         # shellcheck disable=SC2086
-        for f in ${FILES}; do
+        for f in SHA256SUMS ${FILES}; do
           [ -s "${f}.sigstore.json" ] || fail bundle "Missing signature bundle" "${f}.sigstore.json was not written." \
             "Check the Sigstore signing step above."
         done
@@ -198,7 +199,7 @@ runs:
             "Push the tag first and check that the token has contents: write."
         # Word splitting is intended: names are restricted to plain file names by step 1.2.
         # shellcheck disable=SC2086,SC2046
-        gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" SHA256SUMS ${FILES} $(printf '%s.sigstore.json ' ${FILES}) ||
+        gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" SHA256SUMS SHA256SUMS.sigstore.json ${FILES} $(printf '%s.sigstore.json ' ${FILES}) ||
           fail release "Cannot attach assets to ${TAG}" "gh release upload failed; an asset may already exist (assets are never overwritten)." \
             "Delete the partial assets of ${TAG}, then re-run."
 
