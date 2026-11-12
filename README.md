@@ -1,6 +1,8 @@
 # sign-pypi-package-action
 
 [![CI](https://github.com/durandtibo/sign-pypi-package-action/actions/workflows/ci.yaml/badge.svg)](https://github.com/durandtibo/sign-pypi-package-action/actions/workflows/ci.yaml)
+[![Nightly](https://github.com/durandtibo/sign-pypi-package-action/actions/workflows/nightly.yaml/badge.svg)](https://github.com/durandtibo/sign-pypi-package-action/actions/workflows/nightly.yaml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/durandtibo/sign-pypi-package-action/badge)](https://scorecard.dev/viewer/?uri=github.com/durandtibo/sign-pypi-package-action)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/tag/durandtibo/sign-pypi-package-action?label=release)](https://github.com/durandtibo/sign-pypi-package-action/tags)
 
@@ -82,7 +84,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build package
-        uses: durandtibo/build-pypi-package-action@0.0.1
+        uses: durandtibo/sign-pypi-package-action@0.0.1
 
   sign:
     needs: build
