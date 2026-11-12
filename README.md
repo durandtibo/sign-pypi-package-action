@@ -10,8 +10,8 @@ A composite GitHub Action that signs Python package distributions with Sigstore 
 along with their signatures, to a GitHub release.
 
 Point it at a job that already produced a `dist` artifact (wheel + sdist + `SHA256SUMS`), and it verifies
-the checksums, signs every distribution with Sigstore's keyless OIDC signing, and attaches the
-distributions, their signature bundles and `SHA256SUMS` to the release for the tag.
+the checksums, signs every distribution and `SHA256SUMS` with Sigstore's keyless OIDC signing, and
+attaches the distributions, `SHA256SUMS` and their signature bundles to the release for the tag.
 
 ## Why use it
 
