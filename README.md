@@ -24,7 +24,8 @@ catches problems before a release goes out with bad assets:
   planted `*.sigstore.json`) fails the job instead of being signed or released.
 - Every distribution and `SHA256SUMS` itself are signed with [Sigstore](https://www.sigstore.dev/), so
   consumers can verify provenance, also of the checksums file, without you managing signing keys.
-- Release assets are never overwritten.
+- Release assets are never overwritten, and a release that the action creates stays a draft until all
+  assets are attached.
 
 ## How it works
 
@@ -55,6 +56,11 @@ artifact. It removes its work directory first, so a run never sees the files of 
   `SHA256SUMS` file (`sha256sum -- *.tar.gz *.whl > SHA256SUMS`). File names may only contain letters,
   digits, `.`, `_`, `+` and `-`, and must not start with `.` or `-`.
 - The tag must already exist. The action creates the release if it is missing and otherwise reuses it.
+  A release created by the action is a draft until all assets are attached, then published. If the
+  upload fails, that draft is deleted (never the tag). With GitHub immutable releases enabled, assets can
+  only be added to a draft, so let the action create the release instead of creating it beforehand.
+- To re-run after a failure: a release created by the failed run is gone, so just re-run. A release that
+  existed before may hold partial assets; delete them first, because assets are never overwritten.
 
 ## Inputs
 
@@ -130,6 +136,8 @@ uvx sigstore verify github --repository <owner>/<repo> SHA256SUMS # then: sha256
 
 ## Migration from `v0.0.1`
 
+- A release created by the action is published only after all assets are attached (it is a draft
+  before), and removed if the upload fails.
 - `SHA256SUMS` is signed too: the release gets one more asset, `SHA256SUMS.sigstore.json`.
 - The `signatures` workflow artifact is gone; use `gh release download <tag> --pattern '*.sigstore.json'`.
 - Release assets are never overwritten: re-running on a tag that already has them fails with
