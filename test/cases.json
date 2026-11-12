@@ -197,5 +197,17 @@
     "stage": ":",
     "expected": "tag",
     "tag": "space"
+  },
+  {
+    "name": "missing-artifact",
+    "stage": ":",
+    "expected": "unexpected",
+    "artifact": "dist-does-not-exist"
+  },
+  {
+    "name": "existing-draft-release",
+    "stage": ":",
+    "expected": "",
+    "tag": "draft"
   }
 ]

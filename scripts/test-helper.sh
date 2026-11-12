@@ -3,14 +3,33 @@
 # and the last released tag, so verification logic is written once.
 set -euo pipefail
 
-# create_release <tag>: a throwaway release (and its tag) on the current commit.
+# extract_step <action.yml> <step number>: the run: block of the step (for example "3.1"), de-indented.
+extract_step() {
+	awk -v p="- name: $2 " '
+		index($0, p) { s = 1; next }
+		s && /^    - name:/ { exit }
+		s && /^      run: \|/ { r = 1; next }
+		s && r { sub(/^        /, ""); print }
+	' "$1"
+}
+
+# create_release <tag> [extra gh flag...]: a throwaway release (and its tag) on the current commit.
 create_release() {
 	local tag="$1"
+	shift
 	gh release create "${tag}" \
 		--repo "${GITHUB_REPOSITORY}" \
 		--title "Test run ${tag} (throwaway, will be deleted)" \
 		--notes "Created by the CI workflow, safe to ignore/delete." \
-		--target "${GITHUB_SHA}"
+		--target "${GITHUB_SHA}" \
+		"$@"
+}
+
+# create_draft_release <tag>: a draft release on an existing tag, as a user could create beforehand.
+create_draft_release() {
+	local tag="$1"
+	create_tag "${tag}"
+	create_release "${tag}" --draft --verify-tag
 }
 
 # create_tag <tag>: a tag on the current commit, without a release.
@@ -34,21 +53,76 @@ assert_sigstore_valid() {
 	uvx sigstore verify github --repository "${repository}" "$@"
 }
 
-# assert_release_assets <tag> <with-sums-bundle: true|false>
-# The release holds the distributions, a bundle per file and SHA256SUMS. Since the
-# checksums file is signed too, SHA256SUMS.sigstore.json is expected unless the
-# last released tag (which does not sign it) is tested.
-assert_release_assets() {
-	local tag="$1" sums_bundle="$2" assets pattern patterns
-	patterns=('\.tar\.gz$' '\.whl$' '\.sigstore\.json$' '^SHA256SUMS$')
-	if [ "${sums_bundle}" = "true" ]; then patterns+=('^SHA256SUMS\.sigstore\.json$'); fi
-	assets="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')"
-	for pattern in "${patterns[@]}"; do
-		echo "${assets}" | grep -qE "${pattern}" || {
-			echo "::error::no release asset matching '${pattern}', got: ${assets}"
+# release_asset_names <dist-dir> <with-sums-bundle: true|false>
+# The names the release must hold for a dist directory: SHA256SUMS, every file it lists, and a
+# bundle for each (SHA256SUMS.sigstore.json only when the tested version signs the checksums file).
+release_asset_names() {
+	local dist="$1" sums_bundle="$2" names
+	names="$(sed -E 's/^.{64} .//' "${dist}/SHA256SUMS")"
+	{
+		echo SHA256SUMS
+		echo "${names}"
+		echo "${names}" | awk '{ print $0 ".sigstore.json" }'
+		if [ "${sums_bundle}" = "true" ]; then echo SHA256SUMS.sigstore.json; fi
+	} | sort
+}
+
+# assert_release_matches_dist <tag> <dist-dir> <with-sums-bundle: true|false>
+# The release holds exactly the assets expected for the dist the action was given (nothing missing,
+# nothing extra), and every uploaded distribution and SHA256SUMS is byte-identical to its source.
+assert_release_matches_dist() {
+	local tag="$1" dist="$2" sums_bundle="$3" expected actual tmp f
+	expected="$(release_asset_names "${dist}" "${sums_bundle}")"
+	actual="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | sort)"
+	[ "${expected}" = "${actual}" ] || {
+		echo "::error::release ${tag} assets differ from the dist ('<' missing, '>' unexpected):"
+		diff <(echo "${expected}") <(echo "${actual}") || true
+		exit 1
+	}
+	tmp="$(mktemp -d)"
+	gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" --dir "${tmp}"
+	for f in SHA256SUMS $(sed -E 's/^.{64} .//' "${dist}/SHA256SUMS"); do
+		cmp -s "${dist}/${f}" "${tmp}/${f}" || {
+			echo "::error::release asset ${f} of ${tag} is not identical to the file that was checksummed"
 			exit 1
 		}
 	done
+	rm -rf "${tmp}"
+}
+
+# assert_release_verifies <tag> <repository> <with-sums-bundle: true|false>
+# What a consumer does: download the release assets and verify each one with its bundle.
+assert_release_verifies() {
+	local tag="$1" repository="$2" sums_bundle="$3" tmp f files=()
+	tmp="$(mktemp -d)"
+	gh release download "${tag}" --repo "${GITHUB_REPOSITORY}" --dir "${tmp}"
+	for f in "${tmp}"/*.tar.gz "${tmp}"/*.whl; do
+		[ -e "${f}" ] && files+=("${f}")
+	done
+	if [ "${sums_bundle}" = "true" ]; then files+=("${tmp}/SHA256SUMS"); fi
+	assert_sigstore_valid "${repository}" "${files[@]}"
+	rm -rf "${tmp}"
+}
+
+# assert_release_draft <tag>
+# A release that existed as a draft before the run is only added to, never published by the action.
+assert_release_draft() {
+	local tag="$1" draft
+	draft="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
+	[ "${draft}" = "true" ] || {
+		echo "::error::release ${tag} existed as a draft and must stay one (isDraft=${draft})"
+		exit 1
+	}
+}
+
+# assert_no_release <tag>
+# A run rejected before releasing leaves no release (not even a draft) behind.
+assert_no_release() {
+	local tag="$1"
+	if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+		echo "::error::release ${tag} exists after a run that must not create one"
+		exit 1
+	fi
 }
 
 # assert_release_published <tag>

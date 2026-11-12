@@ -61,11 +61,13 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 
 ## Workflow structure (`.github/workflows/`)
 
-- `ci.yaml`: entry point for pull requests, pushes to `main`, a weekly schedule and manual runs. It
+- `ci.yaml`: entry point for pull requests, pushes to `main`, a nightly schedule and manual runs. It
   holds no steps, only jobs that call the reusable workflows below.
   - `lib-get-test-matrix.yaml`: loads the OS (and Python version) lists from
     `durandtibo/workflow-config-action` once and passes them down as `test-matrix`.
   - `ci-format.yaml`: the format check (`make format`, no diff allowed) and the whole `make lint`.
+  - `ci-shell.yaml`: runs `make test-local` and the escaping assertion of the `fail` helper on
+    Linux/macOS/Windows, from the same `test-matrix`.
   - `ci-action.yaml`: the one end-to-end suite, with a `released` input. `released: false` tests this
     checkout (`uses: ./`), `released: true` the pinned last release. The `sign` job covers
     Linux/macOS/Windows; the `case` job is a matrix over the flat list in `test/cases.json`.
@@ -101,19 +103,26 @@ Conventions:
 - Every check calls `fail <id> ...` and has a row in `test/cases.json` with the expected
   `failed-check` id. A new case is one row: `name`, a `stage` snippet that mutates a copy of the good
   `dist/`, `expected` (`""` = accepted), and optionally `released`, `runs` (`2` runs the action twice)
-  and `tag` (`new` default, `same`, `unreleased`, `missing`, `none`; see the `case` job). A rejected
-  single run must also leave no asset on the release.
+  `artifact` (download another artifact than the staged one) and `tag` (`new` default, `same`,
+  `unreleased`, `missing`, `none`, `dash`, `space`, `draft`; see the `case` job). A rejected single run
+  must also leave no asset on the release, and an accepted run must leave exactly the expected assets,
+  byte-identical to the dist (`assert_release_matches_dist`).
 - Tests assert the `failed-check` id, never the message text.
-- The escaping of `fail` (annotation and summary) is tested locally and in the `build` job by
+- The escaping of `fail` (annotation and summary) is tested locally and in `ci-shell.yaml` by
   `assert_fail_helper_escapes`, which runs the helper extracted from `action.yml` on hostile text.
-- Review-only exceptions, because they are third-party and can only end in `unexpected`: step 1.1
-  (artifact download) and step 2.2 (Sigstore signing).
-- Step 2.3 (bundle check) has no row: Sigstore cannot succeed without writing the bundle. It is a
-  guard against a change of the signing action. If a row becomes possible (for example a stub
-  signing action), move it into the table.
-- The draft publish failure and cleanup path of step 3.1 (GitHub cannot be made to fail on demand) is
-  covered by `second-run` for the condition that nothing is deleted when the release pre-existed, and by
-  reading for the deletion of a draft created by the run.
+- Review-only exception: step 2.2 (Sigstore signing) is third-party and can only end in `unexpected`.
+  Step 1.1 (artifact download) is covered by the `missing-artifact` row.
+- The `sign` job also checks what a consumer does: the assets downloaded from the release verify
+  with their bundles (`assert_release_verifies`).
+- `make test-local` needs no runner and has two parts: `scripts/test-local.sh` runs the table rows
+  that need no release, and `scripts/test-steps.sh` runs the extracted steps on a fake runner:
+  0.1, 0.2 (including output injection), 1.2 outputs, 1.4 with the `shasum` fallback, 2.1, 2.3
+  (bundle check, which has no table row because Sigstore cannot succeed without writing the
+  bundle), 3.1 against a stub `gh` (draft creation, publish, deletion of a draft created by the run,
+  nothing deleted when the release pre-existed, never `--cleanup-tag` or `--clobber`), 4.1 and 4.2. It
+  also checks that the ids of `action.yml`, the README table, the output description and
+  `test/cases.json` agree, that every `run:` sets `shell: bash` and has no `${{ }}`, and that every
+  `uses:` is pinned. A new step or id needs its test there.
 - Step 2.1 (`permissions`) cannot share the `case` job, because permissions are per job: it has its
   own `permissions` job without `id-token`.
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.

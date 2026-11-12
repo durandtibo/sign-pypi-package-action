@@ -1,5 +1,5 @@
 # Nightly workflow testing the latest released action, to catch regressions in
-# what consumers pick up. The current (unreleased) code is tested by ci.yaml.
+# what consumers pick up. The current (unreleased) code is tested nightly by ci.yaml.
 #
 # Permissions are set at the job level, not the workflow level.
 
