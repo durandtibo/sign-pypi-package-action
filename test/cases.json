@@ -68,5 +68,12 @@
       "expected": "tag",
       "no_tag": true
     }
+  ],
+  "repeat": [
+    {
+      "name": "second-run",
+      "stage": ":",
+      "expected": "release"
+    }
   ]
 }

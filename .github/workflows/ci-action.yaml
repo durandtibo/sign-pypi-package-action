@@ -30,6 +30,7 @@ jobs:
     outputs:
       accept: ${{ steps.cases.outputs.accept }}
       reject: ${{ steps.cases.outputs.reject }}
+      repeat: ${{ steps.cases.outputs.repeat }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
@@ -49,8 +50,11 @@ jobs:
       - name: Load test cases
         id: cases
         run: |
-          echo "accept=$(jq -c .accept test/cases.json)" >> "$GITHUB_OUTPUT"
-          echo "reject=$(jq -c .reject test/cases.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo "accept=$(jq -c .accept test/cases.json)"
+            echo "reject=$(jq -c .reject test/cases.json)"
+            echo "repeat=$(jq -c .repeat test/cases.json)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
@@ -256,3 +260,69 @@ jobs:
         run: |
           source scripts/test-helper.sh
           assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
+
+  repeat:
+    # Rows of test/cases.json where the action runs twice on the same tag:
+    # the first run must succeed and the second must fail with the expected
+    # id, because release assets are never overwritten.
+    needs: [build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.build.outputs.repeat) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write # Sigstore OIDC keyless signing
+      contents: write # create/delete the throwaway release and attach assets
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Create throwaway release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ci-repeat-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          gh release create "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Test run ${TAG} (throwaway, will be deleted)" \
+            --notes "Created by the CI workflow, safe to ignore/delete." \
+            --target "${GITHUB_SHA}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Run sign action (first run)
+        id: first
+        continue-on-error: true
+        uses: ./
+        with:
+          tag-name: ${{ steps.release.outputs.tag }}
+
+      - name: Run sign action (second run, same tag)
+        id: second
+        continue-on-error: true
+        uses: ./
+        with:
+          tag-name: ${{ steps.release.outputs.tag }}
+
+      - name: Assert first run succeeded and second run failed
+        shell: bash
+        env:
+          LABEL: ${{ matrix.name }}
+          EXPECTED: ${{ matrix.expected }}
+          FIRST: ${{ steps.first.outputs.failed-check }}
+          SECOND: ${{ steps.second.outputs.failed-check }}
+        run: |
+          source scripts/test-helper.sh
+          assert_failed_check "${LABEL} (first run)" "" "${FIRST}"
+          assert_failed_check "${LABEL} (second run)" "${EXPECTED}" "${SECOND}"
+
+      - name: Delete throwaway release and tag
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag || true
