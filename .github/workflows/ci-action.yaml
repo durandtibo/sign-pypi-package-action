@@ -59,6 +59,11 @@ jobs:
           source scripts/test-helper.sh
           assert_fail_helper_escapes action.yml
 
+      - name: Run the local table cases
+        # Steps 0.2 and 1.2 to 1.4 on every row that needs no release; the rest runs below.
+        if: ${{ !inputs.released }}
+        run: make test-local
+
       - name: Build package
         run: uv build test/fixtures/pkg --out-dir dist
 
@@ -179,6 +184,7 @@ jobs:
     #   unreleased  the tag exists but the release does not (the action creates it)
     #   missing     neither the tag nor the release exists
     #   none        tag-name is left unset, as in a run that is not a tag push
+    #   dash, space tag-name is invalid ("-bad..." or "bad tag"): no tag or release exists
     # With runs: 2 the first run uses the good dist-base on the tag and the
     # second one the staged artifact: a second tag for "new", the tag for "same".
     # Rows are asserted on the last run; the first run must succeed.
@@ -228,6 +234,8 @@ jobs:
           source scripts/test-helper.sh
           case "${KIND}" in
             none) tag="" ;;
+            dash) tag="-bad-${BASE}" ;;
+            space) tag="bad tag ${BASE}" ;;
             missing | unreleased | new | same) tag="${BASE}" ;;
             *)
               echo "::error::unknown tag kind '${KIND}' in test/cases.json"

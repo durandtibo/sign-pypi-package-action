@@ -41,7 +41,7 @@
   },
   {
     "name": "crlf-sums",
-    "stage": "sed -i 's/$/\\r/' SHA256SUMS",
+    "stage": "awk '{ printf \"%s\\r\\n\", $0 }' SHA256SUMS > SHA256SUMS.crlf && mv SHA256SUMS.crlf SHA256SUMS",
     "expected": "checksums-file"
   },
   {
@@ -100,5 +100,102 @@
     "expected": "",
     "tag": "new",
     "runs": 2
+  },
+  {
+    "name": "wheel-only",
+    "stage": "rm ./*.tar.gz && sha256sum -- *.whl > SHA256SUMS",
+    "expected": ""
+  },
+  {
+    "name": "sdist-only",
+    "stage": "rm ./*.whl && sha256sum -- *.tar.gz > SHA256SUMS",
+    "expected": ""
+  },
+  {
+    "name": "several-wheels",
+    "stage": "w=$(ls *.whl) && cp \"$w\" pkg-2.0.0-py3-none-any.whl && cp \"$w\" 'pkg-3.0.0+local.1-py3-none-any.whl' && sha256sum -- *.tar.gz *.whl > SHA256SUMS",
+    "expected": ""
+  },
+  {
+    "name": "no-trailing-newline",
+    "stage": "printf '%s' \"$(cat SHA256SUMS)\" > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS",
+    "expected": ""
+  },
+  {
+    "name": "wrong-hash",
+    "stage": "sed 's/^[0-9a-f]\\{64\\}/0000000000000000000000000000000000000000000000000000000000000000/' SHA256SUMS > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS",
+    "expected": "checksum"
+  },
+  {
+    "name": "wheel-tampered",
+    "stage": "for f in *.whl; do echo corrupted >> \"$f\"; done",
+    "expected": "checksum"
+  },
+  {
+    "name": "uppercase-hash",
+    "stage": "tr 'a-f' 'A-F' < SHA256SUMS > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "short-hash",
+    "stage": "sed 's/^.//' SHA256SUMS > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "single-space-separator",
+    "stage": "sed 's/  / /' SHA256SUMS > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "blank-line",
+    "stage": "echo >> SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "leading-dash-name",
+    "stage": "printf '%064d  -x.whl\\n' 0 >> SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "leading-dot-name",
+    "stage": "printf '%064d  .x.whl\\n' 0 >> SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "absolute-path",
+    "stage": "printf '%064d  /etc/x.whl\\n' 0 >> SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "hidden-file",
+    "stage": "echo x > .hidden",
+    "expected": "file-set"
+  },
+  {
+    "name": "unlisted-name-with-space",
+    "stage": "echo x > 'a b.whl'",
+    "expected": "file-set"
+  },
+  {
+    "name": "hostile-file-name",
+    "stage": "echo x > 'a%0Ab%25.whl'",
+    "expected": "file-set"
+  },
+  {
+    "name": "sums-lists-itself",
+    "stage": "printf '%064d  SHA256SUMS\\n' 0 >> SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "tag-with-dash",
+    "stage": ":",
+    "expected": "tag",
+    "tag": "dash"
+  },
+  {
+    "name": "tag-with-space",
+    "stage": ":",
+    "expected": "tag",
+    "tag": "space"
   }
 ]
