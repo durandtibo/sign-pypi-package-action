@@ -39,6 +39,8 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 
 - Keep input names, defaults, and descriptions consistent with `README.md`. Renaming or removing
   an input is a breaking change and must be flagged.
+- The README table of steps is the one list of `failed-check` ids: `action.yml` only points to it, so
+  a new id is added there, and every id except the review-only ones has a row in `test/cases.json`.
 - Pass inputs to scripts through `env:`, never by interpolating them in `run:`.
 - Every `run:` step sets `shell: bash`.
 - Pin third-party actions (in `action.yml` and workflows) to commit SHAs with a
@@ -75,7 +77,9 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 - `security-scorecard.yaml`: OSSF Scorecard analysis (needs the `TIBOT_*` GitHub App secrets).
 - `.github/dependabot.yml` keeps pip, uv and GitHub Actions dependencies up to date.
 
-The workflow names and structure mirror `durandtibo/cancel-queued-runs-action`; keep them aligned.
+The workflow names and structure mirror `durandtibo/cancel-queued-runs-action` and
+`durandtibo/build-pypi-package-action` (the sibling action that builds the `dist` artifact and
+`SHA256SUMS` this one consumes); keep them aligned.
 
 Conventions:
 

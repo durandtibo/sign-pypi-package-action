@@ -67,16 +67,19 @@ artifact. It removes its work directory first, so a run never sees the files of 
 | Name                 | Description                                                                                                  | Required | Default               |
 | -------------------- | ------------------------------------------------------------------------------------------------------------ | -------- | --------------------- |
 | `tag-name`           | Release tag. Leave unset to use the tag that triggered the run; fails if the run was not triggered by a tag. | No       | `""`                  |
-| `dist-artifact-name` | Name of the artifact with the distributions and `SHA256SUMS`.                                                | No       | `"dist"`              |
+| `dist-artifact-name` | Name of the artifact that holds the distributions and `SHA256SUMS`.                                          | No       | `"dist"`              |
 | `github-token`       | Token used to create the release if needed and attach the assets. Needs `contents: write`.                   | No       | `${{ github.token }}` |
 
 ## Outputs
 
-| Name           | Description                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `failed-check` | Id of the failed check (`tag`, `checksums-file`, `file-set`, `checksum`, `permissions`, `bundle`, `release`), `unexpected` for any other failure, empty on success. |
+| Name           | Description                                                                                                                                              |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `failed-check` | Id of the failed check, `unexpected` for any other failure, empty on success. The ids are the last column of the table in [How it works](#how-it-works). |
 
-A failure also writes an annotation and a job summary with the values involved and how to fix it.
+A failure also writes an annotation and a job summary with the values involved and how to fix it. A
+success writes a summary with the release link, the assets, the command to verify a file and the
+checksums. The table in [How it works](#how-it-works) is the one list of ids; `unexpected` covers the
+third-party steps 1.1 and 2.2 and anything else.
 
 ## Permissions
 
