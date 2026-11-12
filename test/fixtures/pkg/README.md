@@ -1,3 +1,3 @@
-# pypi-release-action-fixture
+# sign-pypi-package-action-fixture
 
-Throwaway fixture package used to test the `pypi-release-action` composite actions. Not published for real use.
+Throwaway fixture package used to test the `sign-pypi-package-action` composite action. Not published for real use.

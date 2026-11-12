@@ -22,12 +22,10 @@ jobs:
   # Test the latest released action
   test-released:
     needs: get-matrix
-    uses: ./.github/workflows/nightly-test-released.yaml
+    uses: ./.github/workflows/ci-action.yaml
     with:
       test-matrix: ${{ needs.get-matrix.outputs.test_matrix }}
+      released: true
     permissions:
       contents: write # create/delete the throwaway release and attach assets
       id-token: write # Sigstore OIDC keyless signing
-      # write: reject-* jobs delete stale "dist" artifacts between each
-      # other to avoid by-name download ambiguity (see nightly-test-released.yaml).
-      actions: write
