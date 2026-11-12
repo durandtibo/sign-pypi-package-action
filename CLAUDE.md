@@ -6,9 +6,11 @@ Guidance for coding agents working in this repository.
 
 A GitHub composite action (`action.yml`) that signs Python package distributions with Sigstore and
 attaches them, with their signatures, to a GitHub release. It downloads the `dist` artifact, verifies
-`SHA256SUMS` (failing closed on mismatches or unlisted files), signs with keyless OIDC, uploads a
-`signatures` artifact and attaches everything to the release. The logic lives inline in `action.yml`
-(bash steps that must work on Linux, macOS and Windows runners). End-to-end testing is done by
+`SHA256SUMS` (failing closed on mismatches or unlisted files), signs with keyless OIDC and attaches
+everything to the release with `gh` (assets are never overwritten). The logic lives inline in `action.yml`
+(bash steps that must work on Linux, macOS and Windows runners), in steps named `N.x` by topic:
+`0.1` failure helper, `0.2` tag, `1.1` download, `1.2` SHA256SUMS, `1.3` file set, `1.4` checksums,
+`2.1` sign, `3.1` release, `4.1` summary, `4.2` report. One purpose and one failure id per step. End-to-end testing is done by
 workflows against a throwaway release, using the fixture package in `test/fixtures/pkg/` and the shared
 assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 
@@ -18,7 +20,7 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 - Do not edit `.make/`: it is a shared directory synced by `bot-sync-shared-makefile.yaml`.
 - Run `make format` and `make lint` before committing. Fix what they report instead of disabling
   rules.
-- The end-to-end tests (`ci-action.yaml`, `nightly-test-released.yaml`) need GitHub runners, OIDC and release
+- The end-to-end tests (`ci-action.yaml`) need GitHub runners, OIDC and release
   permissions, so they cannot be run locally; say so in the PR instead of claiming they pass.
 
 ## Git workflow
@@ -61,11 +63,11 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
     `durandtibo/workflow-config-action` once and passes them down as `test-matrix`.
   - `ci-format.yaml`: YAML, Makefile, shell and Markdown format checks plus shell lint and `actionlint` (runs `make`
     targets).
-  - `ci-action.yaml`: end-to-end test of the action from this checkout (`uses: ./`), i.e. the
-    version not released yet. Covers Linux/macOS/Windows plus the checksum failure paths
-    (`reject-tampered-checksums`, `reject-unlisted-file`, `reject-missing-checksums`).
-- `nightly.yaml`: scheduled entry point (and manual runs) calling `nightly-test-released.yaml`, the
-  same tests against the last released tag, to catch regressions in what users run today.
+  - `ci-action.yaml`: the one end-to-end suite, with a `released` input. `released: false` tests this
+    checkout (`uses: ./`), `released: true` the pinned last release. The `sign` job covers
+    Linux/macOS/Windows; the `accept`, `reject` and `repeat` jobs are matrices over `test/cases.json`.
+- `nightly.yaml`: scheduled entry point (and manual runs) calling `ci-action.yaml` with
+  `released: true`, to catch regressions in what users run today.
 - `ci-verify-workflows.yaml`: lints the workflow files themselves. It has its own triggers and is not
   called from `ci.yaml`, so it can be a required check.
 - `security-dependency-review.yaml`: dependency review on pull requests.
@@ -80,17 +82,23 @@ Conventions:
 - Every workflow has `permissions: {}` at the workflow level; give jobs the narrowest permissions they need, including jobs that call a reusable
   workflow.
 - Reusable workflows that need no input also have `workflow_dispatch`, so they can be run alone;
-  `ci-action.yaml` and `nightly-test-released.yaml` take the `test-matrix` input from their caller.
+  `ci-action.yaml` takes the `test-matrix` and `released` inputs from its caller.
 - Put `make` targets in the steps rather than duplicating commands, so local runs and CI match.
 - Start each file with a comment saying what it does, and update it when the behaviour changes.
-- When a released tag is bumped, update the version referenced in `nightly-test-released.yaml` and its header
-  comment.
+- When a released tag is bumped, update the pinned SHA and ratchet comment of the released action in `ci-action.yaml`,
+  flag the rows of `test/cases.json` the new version supports with `"released": true`, and delete the
+  helpers that only existed for the old tag.
 
 ## Tests
 
-- Every behaviour of `action.yml` must be covered by an end-to-end job in `ci-action.yaml` (and
-  `nightly-test-released.yaml` where the released version supports it).
-- Cover success and failure paths (tampered checksum, unlisted file, missing `SHA256SUMS`).
+- Every behaviour of `action.yml` must be covered by an end-to-end job in `ci-action.yaml`, which
+  also runs against the released tag for rows flagged `"released": true`.
+- Every check calls `fail <id> ...` and has a row in `test/cases.json` (`accept`, `reject` or
+  `repeat`) with the expected `failed-check` id. A new case is one row: `name`, a `stage` snippet
+  that mutates a copy of the good `dist/`, `expected`, and optionally `released` / `no_tag`.
+- Tests assert the `failed-check` id, never the message text.
+- Review-only exceptions, because they are third-party and can only end in `unexpected`: step 1.1
+  (artifact download) and step 2.1 (Sigstore signing, for example a missing `id-token` permission).
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
 - Every bug fix needs a regression test that fails without the fix.
 - If a check fails for a real reason, report it rather than weakening the test.
