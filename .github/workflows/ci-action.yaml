@@ -1,10 +1,18 @@
-# Tests this composite action end-to-end, across Linux/macOS/Windows: it
-# creates a throwaway GitHub release/tag, signs a fixture package's
-# distributions with Sigstore, and attaches them to that release, then
-# deletes the release/tag again. Also runs every row of test/cases.json
-# (accept and reject jobs): each stages a modified copy of the built dist,
-# runs the action on it and asserts the exact failed-check id. These checks
-# aren't OS-dependent so only run on ubuntu-latest.
+# End-to-end test suite of this composite action, for both the code in this
+# checkout (released: false, uses: ./) and the last released tag
+# (released: true), so the two never drift apart.
+#
+# - build: builds the fixture package once and uploads it as "dist-base".
+# - sign: across Linux/macOS/Windows, creates a throwaway release, runs the
+#   action, verifies the Sigstore bundles and the asset set, deletes the release.
+# - accept / reject / repeat: one job per row of test/cases.json. Each stages a
+#   modified copy of dist-base and asserts the exact failed-check id. They are
+#   not OS-dependent so only run on ubuntu-latest.
+#
+# The released version (v0.0.1) has neither the failed-check output nor the
+# dist-artifact-name input, so no row is flagged "released": true yet. At release
+# time: flag the rows the new version supports, bump the SHA below (and
+# the ratchet comment), and drop the extra "dist" upload of the build job.
 
 name: Test Action
 on:
@@ -14,15 +22,19 @@ on:
         description: "JSON test matrix from lib-get-test-matrix.yaml, loaded once by the caller"
         required: true
         type: string
+      released:
+        description: "Test the last released tag instead of this checkout"
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
 jobs:
   build:
-    # Signing isn't OS-dependent, so a single build here just produces the
-    # one "dist" artifact this action's tests consume. Uses a plain
-    # "uv build" rather than the build-pypi-package-action, to keep this
-    # repo's tests independent of that other action.
+    # Signing isn't OS-dependent, so a single build here produces the one
+    # distribution set all tests consume. Uses a plain "uv build" rather than
+    # the build-pypi-package-action, to keep this repo's tests independent of it.
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -35,28 +47,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
 
-      - name: Stage fixture package at repo root
-        run: cp -r test/fixtures/pkg/. .
-
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # ratchet:astral-sh/setup-uv@v10.3.3
 
       - name: Build package
-        run: uv build
+        run: uv build test/fixtures/pkg --out-dir dist
 
       - name: Generate checksums
         run: cd dist && sha256sum -- *.tar.gz *.whl > SHA256SUMS
 
       - name: Load test cases
         id: cases
+        env:
+          RELEASED: ${{ inputs.released }}
         run: |
-          {
-            echo "accept=$(jq -c .accept test/cases.json)"
-            echo "reject=$(jq -c .reject test/cases.json)"
-            echo "repeat=$(jq -c .repeat test/cases.json)"
-          } >> "$GITHUB_OUTPUT"
+          # With released: true only the rows flagged "released" run.
+          for list in accept reject repeat; do
+            echo "${list}=$(jq -c --argjson r "${RELEASED}" ".${list} | map(select(\$r == false or .released == true))" test/cases.json)"
+          done >> "$GITHUB_OUTPUT"
 
-      - name: Upload distribution artifacts
+      - name: Upload distributions for the cases
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
+        with:
+          name: dist-base
+          path: dist/
+          retention-days: 1
+
+      - name: Upload distributions as "dist" for the released action
+        # The released v0.0.1 only downloads an artifact named "dist".
+        if: inputs.released
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
         with:
           name: dist
@@ -87,53 +106,61 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ci-sign-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
-          tag="ci-sign-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          gh release create "$tag" \
-            --repo "${{ github.repository }}" \
-            --title "Test run $tag (throwaway, will be deleted)" \
+          gh release create "${TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "Test run ${TAG} (throwaway, will be deleted)" \
             --notes "Created by the CI workflow, safe to ignore/delete." \
-            --target "${{ github.sha }}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            --target "${GITHUB_SHA}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Run sign action
+      - name: Run sign action (this checkout)
+        if: ${{ !inputs.released }}
         uses: ./
+        with:
+          tag-name: ${{ steps.release.outputs.tag }}
+
+      - name: Run sign action (released)
+        if: ${{ inputs.released }}
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ${{ steps.release.outputs.tag }}
 
       - name: Assert signature bundles are cryptographically valid
         # A file merely named *.sigstore.json proves nothing by itself; this
-        # actually verifies each bundle's signature against Sigstore's
-        # transparency log and checks it was produced by a workflow run in
-        # this repository, catching e.g. a signing step that emits
-        # well-formed but bogus/self-signed bundles.
+        # verifies each bundle against Sigstore's transparency log and checks it
+        # was produced by a workflow run in this repository. The current action
+        # downloads to RUNNER_TEMP/dist, the released one to the workspace.
         shell: bash
+        env:
+          DIST_DIR: ${{ inputs.released && 'dist' || format('{0}/dist', runner.temp) }}
         run: |
           source scripts/test-helper.sh
-          assert_sigstore_valid "${{ github.repository }}" "${RUNNER_TEMP}"/dist/*.tar.gz "${RUNNER_TEMP}"/dist/*.whl
+          assert_sigstore_valid "${GITHUB_REPOSITORY}" "${DIST_DIR}"/*.tar.gz "${DIST_DIR}"/*.whl
 
       - name: Assert all expected assets were attached to the release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
           source scripts/test-helper.sh
-          assert_release_assets "${{ steps.release.outputs.tag }}"
+          assert_release_assets "${TAG}"
 
       - name: Delete throwaway release and tag
         if: always()
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete "${{ steps.release.outputs.tag }}" \
-            --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          TAG: ${{ steps.release.outputs.tag }}
+        run: gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag || true
 
   accept:
     # Rows of test/cases.json that the action must accept: it runs to the end
     # (throwaway release included) and reports no failed check.
     needs: [build]
+    if: needs.build.outputs.accept != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -150,7 +177,7 @@ jobs:
       - name: Download base distributions
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # ratchet:actions/download-artifact@v8.0.2
         with:
-          name: dist
+          name: dist-base
           path: case-dist
 
       - name: Stage case
@@ -180,10 +207,20 @@ jobs:
             --target "${GITHUB_SHA}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Run sign action
-        id: sign
+      - name: Run sign action (this checkout)
+        id: sign-local
+        if: ${{ !inputs.released }}
         continue-on-error: true
         uses: ./
+        with:
+          tag-name: ${{ steps.release.outputs.tag }}
+          dist-artifact-name: dist-${{ matrix.name }}
+
+      - name: Run sign action (released)
+        id: sign-released
+        if: ${{ inputs.released }}
+        continue-on-error: true
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
           tag-name: ${{ steps.release.outputs.tag }}
           dist-artifact-name: dist-${{ matrix.name }}
@@ -193,10 +230,21 @@ jobs:
         env:
           LABEL: ${{ matrix.name }}
           EXPECTED: ${{ matrix.expected }}
-          ACTUAL: ${{ steps.sign.outputs.failed-check }}
+          RELEASED: ${{ inputs.released }}
+          ACTUAL: ${{ steps.sign-local.outputs.failed-check }}
+          OUTCOME: ${{ steps.sign-released.outcome }}
         run: |
           source scripts/test-helper.sh
-          assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
+          # The released version has no failed-check output: only its outcome is known.
+          if [ "${RELEASED}" = "true" ]; then
+            if [ -z "${EXPECTED}" ]; then
+              assert_success "${LABEL}" "${OUTCOME}"
+            else
+              assert_failure "${LABEL}" "${OUTCOME}"
+            fi
+          else
+            assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
+          fi
 
       - name: Delete throwaway release and tag
         if: always()
@@ -211,6 +259,7 @@ jobs:
     # failed-check id, before signing or touching a release. Needs no
     # id-token/contents: write permissions since it never reaches those steps.
     needs: [build]
+    if: needs.build.outputs.reject != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -226,7 +275,7 @@ jobs:
       - name: Download base distributions
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # ratchet:actions/download-artifact@v8.0.2
         with:
-          name: dist
+          name: dist-base
           path: case-dist
 
       - name: Stage case
@@ -242,13 +291,33 @@ jobs:
           path: case-dist/
           retention-days: 1
 
-      - name: Run sign action
-        id: sign
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        env:
+          NO_TAG: ${{ matrix.no_tag }}
+          TAG: ci-reject-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          # no_tag rows leave tag-name unset: the run is not a tag push.
+          if [ "${NO_TAG}" = "true" ]; then TAG=""; fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Run sign action (this checkout)
+        id: sign-local
+        if: ${{ !inputs.released }}
         continue-on-error: true
         uses: ./
         with:
-          # no_tag rows leave tag-name unset: the run is not a tag push.
-          tag-name: ${{ !matrix.no_tag && format('ci-reject-{0}-{1}-{2}', matrix.name, github.run_id, github.run_attempt) || '' }}
+          tag-name: ${{ steps.tag.outputs.tag }}
+          dist-artifact-name: dist-${{ matrix.name }}
+
+      - name: Run sign action (released)
+        id: sign-released
+        if: ${{ inputs.released }}
+        continue-on-error: true
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        with:
+          tag-name: ${{ steps.tag.outputs.tag }}
           dist-artifact-name: dist-${{ matrix.name }}
 
       - name: Assert the expected check failed
@@ -256,16 +325,28 @@ jobs:
         env:
           LABEL: ${{ matrix.name }}
           EXPECTED: ${{ matrix.expected }}
-          ACTUAL: ${{ steps.sign.outputs.failed-check }}
+          RELEASED: ${{ inputs.released }}
+          ACTUAL: ${{ steps.sign-local.outputs.failed-check }}
+          OUTCOME: ${{ steps.sign-released.outcome }}
         run: |
           source scripts/test-helper.sh
-          assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
+          # The released version has no failed-check output: only its outcome is known.
+          if [ "${RELEASED}" = "true" ]; then
+            if [ -z "${EXPECTED}" ]; then
+              assert_success "${LABEL}" "${OUTCOME}"
+            else
+              assert_failure "${LABEL}" "${OUTCOME}"
+            fi
+          else
+            assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
+          fi
 
   repeat:
     # Rows of test/cases.json where the action runs twice on the same tag:
     # the first run must succeed and the second must fail with the expected
     # id, because release assets are never overwritten.
     needs: [build]
+    if: needs.build.outputs.repeat != '[]'
     strategy:
       fail-fast: false
       matrix:
@@ -293,27 +374,49 @@ jobs:
             --target "${GITHUB_SHA}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Run sign action (first run)
-        id: first
+      - name: Run sign action (first run) (this checkout)
+        id: first-local
+        if: ${{ !inputs.released }}
         continue-on-error: true
         uses: ./
         with:
           tag-name: ${{ steps.release.outputs.tag }}
+          dist-artifact-name: dist-base
 
-      - name: Run sign action (second run, same tag)
-        id: second
+      - name: Run sign action (first run) (released)
+        id: first-released
+        if: ${{ inputs.released }}
+        continue-on-error: true
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        with:
+          tag-name: ${{ steps.release.outputs.tag }}
+          dist-artifact-name: dist-base
+
+      - name: Run sign action (second run, same tag) (this checkout)
+        id: second-local
+        if: ${{ !inputs.released }}
         continue-on-error: true
         uses: ./
         with:
           tag-name: ${{ steps.release.outputs.tag }}
+          dist-artifact-name: dist-base
+
+      - name: Run sign action (second run, same tag) (released)
+        id: second-released
+        if: ${{ inputs.released }}
+        continue-on-error: true
+        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        with:
+          tag-name: ${{ steps.release.outputs.tag }}
+          dist-artifact-name: dist-base
 
       - name: Assert first run succeeded and second run failed
         shell: bash
         env:
           LABEL: ${{ matrix.name }}
           EXPECTED: ${{ matrix.expected }}
-          FIRST: ${{ steps.first.outputs.failed-check }}
-          SECOND: ${{ steps.second.outputs.failed-check }}
+          FIRST: ${{ steps.first-local.outputs.failed-check }}
+          SECOND: ${{ steps.second-local.outputs.failed-check }}
         run: |
           source scripts/test-helper.sh
           assert_failed_check "${LABEL} (first run)" "" "${FIRST}"

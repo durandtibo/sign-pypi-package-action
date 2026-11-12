@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Shared assertions for the CI workflows, so ci-action.yaml (and a future
-# nightly-test-released.yaml once a release is tagged) only differ in which sign
-# action ref they exercise (local checkout vs. a released tag), not in
-# verification logic.
+# Shared assertions for ci-action.yaml, which tests both the current checkout
+# and the last released tag, so verification logic is written once.
 set -euo pipefail
 
 # assert_sigstore_valid <repository> <file>...
@@ -10,14 +8,6 @@ assert_sigstore_valid() {
 	local repository="$1"
 	shift
 	uvx sigstore verify github --repository "${repository}" "$@"
-}
-
-# assert_signatures_artifact_uploaded <run-id>
-# Only for nightly-test-released.yaml: the released v0.0.1 still uploads it.
-assert_signatures_artifact_uploaded() {
-	local run_id="$1"
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
-		--jq '.artifacts[].name' | grep -qx 'signatures'
 }
 
 # assert_release_assets <tag>
@@ -31,24 +21,6 @@ assert_release_assets() {
 			exit 1
 		}
 	done
-}
-
-# delete_dist_artifacts <repository> <run-id>
-# Deletes every "dist"-named artifact already uploaded in this run. Needed
-# because nightly-test-released.yaml's checksum-rejection jobs run the pinned stable
-# action, which always downloads an artifact literally named "dist" (it
-# predates the dist-artifact-name input); those jobs are serialized with
-# "needs" and each must clear out the previous job's "dist" artifact before
-# uploading its own, since artifacts are scoped to the whole run rather
-# than the job and a stale one would make the by-name download ambiguous.
-delete_dist_artifacts() {
-	local repository="$1" run_id="$2"
-	local id
-	gh api "repos/${repository}/actions/runs/${run_id}/artifacts" --paginate \
-		--jq '.artifacts[] | select(.name == "dist") | .id' |
-		while read -r id; do
-			gh api -X DELETE "repos/${repository}/actions/artifacts/${id}"
-		done
 }
 
 # assert_failure <label> <actual-outcome>
@@ -69,6 +41,16 @@ assert_failed_check() {
 
 	test "${actual}" = "${expected}" || {
 		echo "::error::${label}: expected failed-check '${expected}', got '${actual}'"
+		exit 1
+	}
+}
+
+# assert_success <label> <actual-outcome>
+assert_success() {
+	local label="$1" actual_outcome="$2"
+
+	test "${actual_outcome}" = "success" || {
+		echo "::error::expected ${label} to succeed, got outcome=${actual_outcome}"
 		exit 1
 	}
 }

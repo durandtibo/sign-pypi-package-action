@@ -3,11 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "pypi-release-action-fixture"
+name = "sign-pypi-package-action-fixture"
 version = "0.0.1a1"
-description = "Throwaway fixture package used to test pypi-release-action composite actions."
+description = "Throwaway fixture package used to test sign-pypi-package-action composite action."
 readme = "README.md"
 requires-python = ">=3.10"
 
 [tool.hatch.build.targets.wheel]
-packages = ["pypi_release_action_fixture"]
+packages = ["sign_pypi_package_action_fixture"]
