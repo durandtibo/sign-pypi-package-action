@@ -99,6 +99,8 @@ Conventions:
   and `tag` (`new` default, `same`, `unreleased`, `missing`, `none`; see the `case` job). A rejected
   single run must also leave no asset on the release.
 - Tests assert the `failed-check` id, never the message text.
+- The escaping of `fail` (annotation and summary) is tested locally and in the `build` job by
+  `assert_fail_helper_escapes`, which runs the helper extracted from `action.yml` on hostile text.
 - Review-only exceptions, because they are third-party and can only end in `unexpected`: step 1.1
   (artifact download) and step 2.1 (Sigstore signing, for example a missing `id-token` permission).
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
