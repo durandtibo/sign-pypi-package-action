@@ -1,6 +1,7 @@
 # Formatting and linting workflow.
 # Checks that the YAML, Makefile, shell and Markdown files follow the repo's
-# formatting rules, and lints the shell scripts and GitHub Actions workflow files.
+# formatting rules, and runs the whole `make lint` (YAML, Makefile, shell,
+# Markdown and GitHub Actions workflow files).
 
 name: Format
 on:
@@ -29,22 +30,18 @@ jobs:
           git diff --exit-code
 
   lint:
-    # Only the lint targets that pass today, not the full `make lint`:
-    # lint-yaml, lint-markdown and lint-makefile currently fail repo-wide
-    # (pre-existing, out of scope here).
+    # The whole `make lint`: yamllint, checkmake, shellcheck, markdownlint and
+    # actionlint. The repo-level configs (.yamllint.yaml, .markdownlint.yaml,
+    # checkmake.ini) keep the shared .make/ directory untouched.
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
 
-      - name: Lint shell scripts
+      - name: Lint
         run: |
-          make lint-shell
-
-      - name: Lint GitHub Actions workflow files
-        run: |
-          make lint-actions
+          make lint

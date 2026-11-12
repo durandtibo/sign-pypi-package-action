@@ -1,0 +1,4 @@
+# markdownlint configuration. Prettier formats the Markdown files and tables
+# cannot be wrapped, so the line length rule is off.
+default: true
+MD013: false
