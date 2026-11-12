@@ -51,6 +51,17 @@ assert_release_assets() {
 	done
 }
 
+# assert_release_published <tag>
+# A release created by the action is public once it is done, not left as a draft.
+assert_release_published() {
+	local tag="$1" draft
+	draft="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
+	[ "${draft}" = "false" ] || {
+		echo "::error::release ${tag} is not published (isDraft=${draft})"
+		exit 1
+	}
+}
+
 # assert_no_assets <tag>
 # A rejected run must stop before signing and releasing: the release has no
 # assets, or does not exist. An empty tag (no tag given) passes.

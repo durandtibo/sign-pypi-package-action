@@ -106,6 +106,9 @@ Conventions:
 - Step 2.3 (bundle check) has no row: Sigstore cannot succeed without writing the bundle. It is a
   guard against a change of the signing action. If a row becomes possible (for example a stub
   signing action), move it into the table.
+- The draft publish failure and cleanup path of step 3.1 (GitHub cannot be made to fail on demand) is
+  covered by `second-run` for the condition that nothing is deleted when the release pre-existed, and by
+  reading for the deletion of a draft created by the run.
 - Step 2.1 (`permissions`) cannot share the `case` job, because permissions are per job: it has its
   own `permissions` job without `id-token`.
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
