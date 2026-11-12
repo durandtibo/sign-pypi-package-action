@@ -128,10 +128,10 @@ jobs:
         # A file merely named *.sigstore.json proves nothing by itself; this
         # verifies each bundle against Sigstore's transparency log and checks it
         # was produced by a workflow run in this repository. The current action
-        # downloads to RUNNER_TEMP/dist, the released one to the workspace.
+        # downloads to RUNNER_TEMP/sign-pypi-package, the released one to the workspace.
         shell: bash
         env:
-          DIST_DIR: ${{ inputs.released && 'dist' || format('{0}/dist', runner.temp) }}
+          DIST_DIR: ${{ inputs.released && 'dist' || format('{0}/sign-pypi-package', runner.temp) }}
         run: |
           source scripts/test-helper.sh
           assert_sigstore_valid "${GITHUB_REPOSITORY}" "${DIST_DIR}"/*.tar.gz "${DIST_DIR}"/*.whl

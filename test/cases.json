@@ -83,5 +83,12 @@
     "expected": "release",
     "tag": "same",
     "runs": 2
+  },
+  {
+    "name": "chained-runs",
+    "stage": "rm ./*.whl && sha256sum -- *.tar.gz > SHA256SUMS",
+    "expected": "",
+    "tag": "new",
+    "runs": 2
   }
 ]
