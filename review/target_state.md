@@ -1,287 +1,342 @@
-# Target state: `sign-pypi-package-action`
+# Target state for `sign-pypi-package-action`
 
-Review of the repository at commit `7f79384` and the proposed target state. Breaking changes are
-accepted where they simplify the action or make it safer. Items that need a CLAUDE.md change are
-marked **[CLAUDE.md]**.
+Review of `main` at `7f79384`. Breaking changes are accepted: the last release is `v0.0.1`, so everything
+below can ship in the next exact tag at no cost to users. The properties in section 1 are the same
+twelve as in `durandtibo/build-pypi-package-action` (`review/target_state.md`), adapted to what this
+action does. The two actions are meant to be chained (build, then sign), so they share one contract.
+
+Nothing in this document has been implemented. The action can only be exercised end to end on GitHub
+Actions. Claims marked **(verified locally)** were checked on macOS with `bash`, `shasum` and `awk`;
+claims marked **(confirm in CI)** need a GitHub run.
 
 ## 1. Properties of the action
 
-These are the properties the action must have. Everything in section 4 is derived from them.
+The target state must satisfy all of these. Section 6 checks each one against the proposal.
 
-| #   | Property                     | Meaning                                                                                                                                                                                    |
-| --- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| P1  | **Single purpose**           | Take a built `dist` artifact, sign it with Sigstore, attach it to a GitHub release. It does not build, publish to PyPI, or create release notes.                                           |
-| P2  | **Fail closed**              | Nothing is signed or released unless `dist/` contains exactly `SHA256SUMS` plus the files it lists, and every checksum matches. Any doubt is an error, before any signing or release call. |
-| P3  | **Keyless**                  | Signing uses OIDC keyless Sigstore only. No secrets, no keys, no tokens beyond `github.token`.                                                                                             |
-| P4  | **Immutable releases**       | Assets are never overwritten. Re-uploading an existing asset is an error.                                                                                                                  |
-| P5  | **Portable**                 | Works on Linux, macOS and Windows runners (bash steps only, `shasum -a 256` fallback).                                                                                                     |
-| P6  | **Minimal trust surface**    | Few third-party actions, all pinned to commit SHAs. Inputs reach scripts only through `env:`. Least-privilege permissions documented for callers.                                          |
-| P7  | **Small and local-testable** | The security-relevant logic is a short script that can be tested locally in seconds. End-to-end runs only confirm the integration (OIDC, release API).                                     |
-| P8  | **Predictable interface**    | Few inputs, safe defaults, every input documented identically in `action.yml` and `README.md`. No input exists only "for tests".                                                           |
-| P9  | **Fast**                     | No unnecessary checkout, artifact round-trip or API call in the caller's job.                                                                                                              |
+| #   | Property           | Definition                                                                                                                                                                                                                      |
+| --- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | **Single purpose** | Take the `dist` artifact produced by a build job, prove it is exactly what was built, sign it with Sigstore, and attach it to a GitHub release. It never builds, publishes to PyPI, or writes release notes.                    |
+| P2  | **Fail closed**    | A check that cannot positively conclude "safe" fails the job, before any signing or release call. Missing, empty, malformed or ambiguous `SHA256SUMS` fails; an extra file fails; nothing is guessed.                           |
+| P3  | **Ground truth**   | The files that are verified are the files that are signed and the files that are released: one list, derived once from `SHA256SUMS` and the directory, never re-globbed. A planted file cannot ride along.                      |
+| P4  | **Reproducible**   | Every third-party action is pinned to a SHA. Nothing is installed at run time except by the signing action. No cache is read or written. Only `gh`, `bash` and `sha256sum`/`shasum` from the runner image are assumed.          |
+| P5  | **Fast**           | Local checks run before network calls: the tag is validated before the download, the checksums before signing. No checkout, no second artifact upload, no re-parsing. The only slow step is Sigstore signing, and it runs once. |
+| P6  | **Simple**         | All logic is inline in `action.yml`. Three inputs, one output. Each step is readable alone and is about 15 lines.                                                                                                               |
+| P7  | **Portable**       | Same behaviour on Linux, macOS and Windows (Git Bash). Keep the `shasum -a 256` fallback for macOS.                                                                                                                             |
+| P8  | **Safe to chain**  | The action can be used more than once in a run and after the build action. It uses no fixed artifact name, does not touch the caller's workspace, and never overwrites a release asset.                                         |
+| P9  | **Secure**         | Inputs and step outputs reach scripts through `env:` only. The caller grants `id-token: write` and `contents: write` and nothing else. No secret other than `github.token`.                                                     |
+| P10 | **Tested**         | Every check has a fixture proving it fails with the expected `failed-check` id, or is listed as an explicit review-only exception. A check that no fixture can fail does not exist. Tests are written once, not twice.          |
+| P11 | **Fail loudly**    | A failure says what failed, why, the values involved and how to fix it, in an annotation and in the job summary. The `failed-check` output names the check; it is `unexpected` when something outside a check failed.           |
+| P12 | **Small steps**    | One purpose and one failure id per step, named `N.x` by topic (`0.x` setup, `1.x` verify, `2.x` sign, `3.x` release, `4.x` report). Adding a check touches one place.                                                           |
 
-## 2. Current state: findings
+## 2. What is good and stays
 
-### 2.1 Action (`action.yml`)
+- **Composite action with bash steps** and no `working-directory`, no PyPI publishing, no build.
+- **`SHA256SUMS` as the contract** with the build job, and the `shasum -a 256` fallback.
+- **Keyless Sigstore** through the official `sigstore/gh-action-sigstore-python`, pinned to a SHA. It
+  manages Python and the OIDC flow; a hand-rolled `sigstore sign` would not be simpler.
+- **`tag-name` and `dist-artifact-name` inputs** (the second is a normal input, not a test hook).
+- **SHA-pinned actions with ratchet comments**, `permissions: {}` plus per-job least privilege,
+  `timeout-minutes` everywhere, `env:` for every input.
+- **Workflow layout** (`ci.yaml`, reusable `ci-*`, `lib-*`, `bot-*`, security workflows, `.make/`).
+- **End-to-end tests on a throwaway release**, with real Sigstore verification of the bundles.
 
-| #   | Finding                                                                                                                                                                                                                                                             | Property | Severity |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | -------- |
-| A1  | **A pre-planted `*.sigstore.json` in the `dist` artifact is released.** The verify step only compares `*.tar.gz`/`*.whl` to `SHA256SUMS`. The release step then uploads `dist/*.sigstore.json`, which can include a file that was in the artifact before signing.   | P2       | High     |
-| A2  | `awk '{print $2}'` breaks on binary-mode entries (`<hash> *name`, produced by `sha256sum -b` and by default on some Windows tools). The listed name becomes `*name`, so a valid artifact is rejected (false negative, but a reliability bug).                       | P2, P5   | Medium   |
-| A3  | Missing `SHA256SUMS`, empty file, and "no `*.tar.gz`/`*.whl`" are caught only by accident: `awk` fails inside a process substitution and `printf` prints the literal unmatched glob. There is no explicit check and no clear `::error` message.                     | P2       | Medium   |
-| A4  | The `signatures` artifact name is fixed. `upload-artifact` v4+ rejects duplicate names within a run, so the `ci-action.yaml` OS matrix (3 jobs, same name) or any caller using the action twice will conflict. The artifact also duplicates what is on the release. | P8, P9   | Medium   |
-| A5  | `softprops/action-gh-release` is a large third-party dependency for one operation. It also silently creates a release if missing and overwrites assets with the same name, which conflicts with P4.                                                                 | P4, P6   | Medium   |
-| A6  | `tag-name` is resolved inline in `with:` with no validation. On a branch trigger, `github.ref_name` is a branch name and the failure happens only at the very end, after signing.                                                                                   | P2, P9   | Low      |
-| A7  | `dist-artifact-name` is documented as "only for tests". It is a legitimate input (callers may name artifacts differently) and the description should say so.                                                                                                        | P8       | Low      |
-| A8  | The sigstore action's `release-signing-artifacts` defaults to `true` and would try to upload on `release` events, overlapping with our own upload. It should be set explicitly.                                                                                     | P4, P6   | Low      |
-| A9  | `dist/` is hard-coded, and the verification is inline Bash that cannot be run or unit-tested locally. **[CLAUDE.md]**                                                                                                                                               | P7       | Medium   |
+## 3. Findings
 
-### 2.2 README
+Ordered by value. "Verified" means checked, not assumed.
 
-- README examples run `actions/checkout` in the `sign` job. The action does not need the repository,
-  so this costs time and broadens the job for nothing (P9).
-- Examples reference `actions/checkout@v7` by tag while the project rule is SHA pinning, and
-  `<ref>` is not guidance. It should say: pin to a full commit SHA or an exact version tag.
-- No section on the security model (what is verified, what is not), on outputs, or on how to verify a
-  release (`sigstore verify github`).
-- The `dist-artifact-name` description differs from `action.yml`.
+### F1. A planted `*.sigstore.json` is released (violates P2, P3)
 
-### 2.3 Tests and CI
+The verify step compares only `*.tar.gz` and `*.whl` to `SHA256SUMS`. The release step then uploads
+`dist/*.sigstore.json`, which also matches a file that was already in the artifact. **(verified
+locally)** With `evil.sigstore.json` next to a valid `SHA256SUMS`, `shasum --check --strict` passes and
+the glob picks the file up.
 
-| #   | Finding                                                                                                                                                                                                                                                                                                      |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| T1  | `ci-action.yaml` and `nightly-test-released.yaml` are ~95% identical (~200 lines each). The only real difference is the `uses:` line. The rest is workaround code for the stable version lacking `dist-artifact-name` (serialization with `needs`, `delete_dist_artifacts`, `actions: write`).               |
-| T2  | Each failure path (`reject-tampered-checksums`, `reject-unlisted-file`, `reject-missing-checksums`) is a full runner job: checkout, `uv` install, build, upload artifact, run the action, assert failure. About 1 to 2 minutes of runner time to test 10 lines of Bash, and the result can't be run locally. |
-| T3  | `continue-on-error` + `outcome == failure` passes if the action fails for the **wrong** reason (e.g. artifact download fails). Failure tests don't assert the error message.                                                                                                                                 |
-| T4  | Fixture is staged by `cp -r test/fixtures/pkg/. .` into the repo root, polluting the checkout. `uv build <dir> --out-dir dist` does the same without copying.                                                                                                                                                |
-| T5  | `test/fixtures/pkg/Makefile` and `tasks.py` (invoke) are unused. The fixture project name `pypi-release-action-fixture` is a leftover from another repo.                                                                                                                                                     |
-| T6  | `test-helper.sh` header mentions "a future nightly-test-released.yaml once a release is tagged", which is stale.                                                                                                                                                                                             |
-| T7  | `assert_sigstore_valid` verifies only that the bundle exists for the repository, not the signing identity or the workflow ref. Using `--cert-identity`/`--cert-oidc-issuer` pinned to the test workflow gives a stronger assertion.                                                                          |
-| T8  | Bumping the released tag requires manually editing `nightly-test-released.yaml` (SHA + comment).                                                                                                                                                                                                             |
+**Fix:** the directory must hold exactly `SHA256SUMS` plus the files it lists (check 1.3). The sign
+and release steps take the verified list, not a glob.
 
-## 3. Target design
+### F2. Valid binary-mode checksums are rejected (violates P2, P7)
 
-### 3.1 Interface
+`awk '{print $2}'` reads `*name` for a `<hash> *name` entry, which `sha256sum -b` and
+`shasum -a 256 -b` write. **(verified locally)** A correct artifact is rejected with a misleading
+"contents don't match" error.
 
-```yaml
-inputs:
-  tag-name:
-    description: Release tag to attach the assets to. Defaults to the tag that triggered the run.
-    required: false
-    default: ""
-  dist-artifact-name:
-    description: Name of the workflow artifact that holds the distributions and SHA256SUMS.
-    required: false
-    default: dist
-  github-token:
-    description: Token used to create/upload to the release (needs contents: write).
-    required: false
-    default: ${{ github.token }}
-```
+**Fix:** parse the line with a strict regex that accepts the optional `*` (check 1.2).
 
-Changes with respect to today:
+### F3. Missing, empty or malformed `SHA256SUMS` fails by accident (violates P2, P11)
 
-- **Removed:** the `signatures` workflow artifact (A4). The signature bundles are on the release; a
-  later job that needs them can `gh release download`. _Breaking._ If a user need appears, add an
-  opt-in `signatures-artifact-name` input (empty = disabled) rather than a fixed name.
-- **Added:** `github-token`, so the token usage is explicit and callers can supply a different one.
-  Default keeps today's behaviour.
-- **Reworded:** `dist-artifact-name` is a normal input (A7).
-- **Behaviour:** the release must either exist or is created with `--verify-tag` (tag must already
-  exist; the action never creates tags). Existing assets are never overwritten (P4).
+`awk` fails inside a process substitution and `diff` happens to see a difference. **(verified
+locally)** The job fails, but nothing says why, and malformed lines, absolute paths, `../` and duplicate
+entries are not examined at all.
 
-### 3.2 Steps
+**Fix:** an explicit check 1.2 with one `fail` per reason.
 
-```text
-1. Resolve tag        bash   tag = inputs.tag-name || github.ref_name; fail if empty or not refs/tags
-                              (fails in ~1 s, before download and signing)  [A6]
-2. Download dist      actions/download-artifact (pinned)  -> $RUNNER_TEMP/dist
-3. Verify dist        bash   scripts/verify-dist.sh "$RUNNER_TEMP/dist"                [A1-A3, A9]
-4. Sign               sigstore/gh-action-sigstore-python (pinned)
-                              inputs: files listed by verify step
-                              release-signing-artifacts: false                          [A8]
-5. Upload to release  bash   gh release view || gh release create --verify-tag;
-                              gh release upload "$TAG" <files> (no --clobber)           [A5, P4]
-```
+### F4. Failures cannot be told apart (violates P10, P11)
 
-Notes:
+The three `reject-*` jobs use `continue-on-error` and assert `outcome == failure`. They pass when the
+action fails for the wrong reason (artifact download, OIDC, tag). There is no `failed-check` output.
 
-- Same number of steps, but one third-party action fewer (`softprops` replaced by the `gh` CLI,
-  preinstalled on all GitHub-hosted runners, including Windows and macOS) and no artifact upload.
-- Download to `$RUNNER_TEMP`, not the workspace: the caller's workspace is not touched and cannot
-  contain stray files that collide with the globs.
-- The script receives paths through arguments/`env:`, never via `${{ }}` in `run:` (P6).
-- `github.ref_name` is read via `env:` too.
+**Fix:** the same mechanism as the build action. `fail` writes the id to
+`${RUNNER_TEMP}/failed-check`; a last step with `if: failure()` publishes it as the `failed-check`
+output (`unexpected` if no id was written). Tests assert the id, never the message text. **(confirm in
+CI)** that a composite step with `if: failure()` runs after a failed `run:` step and that the caller's
+`steps.<id>.outputs.failed-check` is set with `continue-on-error`.
 
-### 3.3 `scripts/verify-dist.sh` (fail closed, testable) **[CLAUDE.md]**
+### F5. The `signatures` artifact has a fixed name (violates P8)
 
-Move the verification out of `action.yml` into a script next to the action, called with
-`"${GITHUB_ACTION_PATH}/scripts/verify-dist.sh"`. CLAUDE.md currently says logic lives inline; update
-it to say "security-relevant logic lives in `scripts/`, linted by `make lint`, unit-tested by
-`make test`". Reasons: it is linted and formatted as a normal file, it runs locally, and it is the
-only place where P2 is enforced.
+`upload-artifact` v4+ rejects a duplicate name within a run. The three-OS matrix in `ci-action.yaml`
+uploads `signatures` three times, and any caller using the action twice does the same. **(confirm in
+CI)** The artifact also duplicates what is on the release.
 
-Contract:
+**Fix:** remove the step and the artifact. _Breaking._ A later job that needs the bundles can run
+`gh release download`.
 
-1. `dist` directory exists, else error.
-2. `SHA256SUMS` exists and is non-empty.
-3. Every line matches `^[0-9a-f]{64}  ?\*?[^/]+$` (hash, optional `*` binary marker, a plain file
-   name: no `/`, no `..`). Anything else is an error. [A2]
-4. Listed names must all end in `.tar.gz` or `.whl`, have at least one entry, and have no duplicates.
-5. The set of files in `dist/` (including hidden files and sub-directories) must equal
-   `listed names + SHA256SUMS`. Any extra file, including `*.sigstore.json`, fails. [A1]
-6. Checksums match: `sha256sum --check --strict` or the `shasum -a 256` fallback (P5).
-7. On success, print the verified file names, one per line, to stdout (used for the sign step input
-   and the release upload so both operate on the same list, not on re-globbed patterns).
-8. Every failure prints `::error::<reason>` and exits 1.
+### F6. `softprops/action-gh-release` creates silently and overwrites (violates P4, P8)
 
-Expected length: ~40 lines of Bash.
+One operation does not justify a large third-party action. It creates a missing release without being
+asked and replaces assets that already exist, which breaks the "immutable release" rule in `CLAUDE.md`.
 
-### 3.4 Release upload
+**Fix:** `gh release upload` without `--clobber`, after `gh release view || gh release create
+--verify-tag`. `gh` is preinstalled on all hosted runners. _Breaking_ (overwrite behaviour). **(confirm
+in CI)** `--verify-tag` when the tag was pushed in the same run, and the non-zero exit on an existing
+asset on all three OSes.
+
+### F7. The tag is validated at the very end (violates P2, P5)
+
+On a branch trigger `github.ref_name` is a branch name, and the failure arrives after the download and
+the signing.
+
+**Fix:** step 0.2 resolves the tag first and fails if it is empty or if the run was not triggered by a
+tag and `tag-name` is unset.
+
+### F8. The signing action's own release upload is implicit (violates P8)
+
+`release-signing-artifacts` defaults to `true` in `sigstore/gh-action-sigstore-python` and overlaps with
+our upload on `release` events.
+
+**Fix:** set `release-signing-artifacts: false` and `upload-signing-artifacts: false` explicitly.
+
+### F9. The test suite is two 200-line copies (violates P10 "written once")
+
+`ci-action.yaml` and `nightly-test-released.yaml` differ by one `uses:` line, a tag name, and
+workaround code for the stable version not having `dist-artifact-name` (serialization with `needs`,
+`delete_dist_artifacts`, `actions: write`). Each failure path is its own job that repeats checkout,
+`uv` install, build and upload.
+
+**Fix:** see section 5. One workflow with a `released` input, one `test/cases.json`, one build.
+
+### F10. Fixture and helper leftovers (violates P6)
+
+`test/fixtures/pkg/Makefile` and `tasks.py` are unused, the project is named
+`pypi-release-action-fixture`, the fixture is copied into the repository root before every build, and
+the `scripts/test-helper.sh` header mentions "a future nightly-test-released.yaml".
+
+### F11. README (violates P11, P9)
+
+The examples run `actions/checkout` in the `sign` job although the action does not need the repository,
+cite `actions/checkout@v7` by tag and `<ref>` without guidance, and the `dist-artifact-name`
+description differs from `action.yml`. There is no security model, no `failed-check`, and no "verify a
+release" section.
+
+## 4. Target design
+
+### 4.1 Interface
+
+| Kind   | Name                 | Description                                                                             |
+| ------ | -------------------- | --------------------------------------------------------------------------------------- |
+| input  | `tag-name`           | Release tag. Default: the tag that triggered the run. Unchanged.                        |
+| input  | `dist-artifact-name` | Artifact with the distributions and `SHA256SUMS`. Default `dist`. Description reworded. |
+| input  | `github-token`       | Token for the release. Default `${{ github.token }}`. **New.**                          |
+| output | `failed-check`       | Id of the failed check, `unexpected` for any other failure, empty on success. **New.**  |
+
+Removed: the `signatures` workflow artifact (F5). No input is renamed. This is the same shape as the
+build action: its `failed-check` ids and the `unexpected` rule are identical.
+
+### 4.2 Steps (10 steps, was 5)
+
+| Step | Name                        | Failure id       | Change vs. today                                                                |
+| ---- | --------------------------- | ---------------- | ------------------------------------------------------------------------------- |
+| 0.1  | Define failure helper       |                  | writes `fail.sh`, clears a stale `failed-check` file (F4)                       |
+| 0.2  | Resolve tag                 | `tag`            | new, runs before the download (F7)                                              |
+| 1.1  | Download distributions      | `unexpected`     | now into `${RUNNER_TEMP}/dist`, not the workspace                               |
+| 1.2  | Check `SHA256SUMS`          | `checksums-file` | new: exists, non-empty, strict line format, plain names, no duplicates (F2, F3) |
+| 1.3  | Check distribution file set | `file-set`       | new: directory equals `SHA256SUMS` plus the listed files (F1)                   |
+| 1.4  | Verify checksums            | `checksum`       | was inline; same `shasum` fallback                                              |
+| 2.1  | Sign with Sigstore          | `unexpected`     | takes the verified list; explicit release flags (F8)                            |
+| 3.1  | Attach to release           | `release`        | `gh` instead of `softprops`; no overwrite (F6)                                  |
+| 4.1  | Write job summary           |                  | new on success: files, hashes, tag                                              |
+| 4.2  | Report failed check         |                  | `if: failure()`, publishes the output (F4)                                      |
+
+Removed: "Upload signature bundles" (F5). Step 2.1 is third-party, so it can only end in
+`unexpected`; see the exceptions in section 5.
+
+### 4.3 Sketch
+
+Untested; written to show the shape, not to paste. Confirm in CI.
 
 ```bash
-gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --notes ""
-gh release upload "$TAG" "${files[@]}" SHA256SUMS
+# 0.1  (written to ${RUNNER_TEMP}/fail.sh; every later step does `source` it)
+rm -f "${RUNNER_TEMP}/failed-check"
+fail() { # id, title, details, how to fix
+  echo "$1" >"${RUNNER_TEMP}/failed-check"
+  echo "::error title=$2::$3"
+  printf '### :x: %s\n\n%s\n\n**How to fix:** %s\n' "$2" "$3" "$4" >>"$GITHUB_STEP_SUMMARY"
+  exit 1
+}
+
+# 1.2  (DIST, from env)
+cd "${DIST}"
+[ -s SHA256SUMS ] || fail checksums-file "SHA256SUMS missing or empty" "..." "..."
+bad="$(grep -nvE '^[0-9a-f]{64} [ *][A-Za-z0-9][A-Za-z0-9._+-]*\.(tar\.gz|whl)$' SHA256SUMS || true)"
+[ -z "${bad}" ] || fail checksums-file "Malformed SHA256SUMS line" "${bad}" "..."
+files="$(sed -E 's/^.{64} .//' SHA256SUMS | sort)"
+[ -z "$(echo "${files}" | uniq -d)" ] || fail checksums-file "Duplicate entry" "..." "..."
+echo "files=$(echo "${files}" | tr '\n' ' ')" >>"$GITHUB_OUTPUT"
+
+# 1.3  (FILES from env; word splitting on purpose, names are restricted by 1.2)
+# shellcheck disable=SC2086
+expected="$(printf '%s\n' SHA256SUMS ${FILES} | sort)"
+actual="$(ls -A | sort)"
+[ "${expected}" = "${actual}" ] ||
+  fail file-set "dist/ does not match SHA256SUMS" "$(diff <(echo "${expected}") <(echo "${actual}"))" "..."
+
+# 3.1  (TAG, FILES from env)
+gh release view "${TAG}" >/dev/null 2>&1 ||
+  gh release create "${TAG}" --verify-tag --title "${TAG}" --notes "" ||
+  fail release "Cannot create release ${TAG}" "..." "..."
+# shellcheck disable=SC2086
+gh release upload "${TAG}" SHA256SUMS ${FILES} $(printf '%s.sigstore.json ' ${FILES}) ||
+  fail release "Cannot attach assets to ${TAG}" "..." "Delete the partial assets, then re-run."
 ```
 
-- Files are the verified list plus their `.sigstore.json` bundles plus `SHA256SUMS`. A missing bundle
-  is an error (replaces `fail_on_unmatched_files`).
-- No `--clobber`: re-running a failed job on a release where some assets already exist fails with a
-  clear message instead of silently replacing published assets. Document "delete the partial
-  assets, then re-run".
+The regex excludes `/`, a leading `.` or `-`, and spaces, so a name cannot be a path, an option or two
+words. The sign step receives `inputs: ${{ steps.files.outputs.files }}` as absolute paths under
+`${RUNNER_TEMP}/dist`; a step output in `with:` is not script interpolation.
 
-### 3.5 Pinned dependencies
+## 5. Tests and repository
 
-| Action                               | Keep? | Note                                     |
-| ------------------------------------ | ----- | ---------------------------------------- |
-| `actions/download-artifact`          | Yes   | Needed, official.                        |
-| `sigstore/gh-action-sigstore-python` | Yes   | Handles Python/sigstore setup. Pin kept. |
-| `actions/upload-artifact`            | No    | Removed with the `signatures` artifact.  |
-| `softprops/action-gh-release`        | No    | Replaced by `gh` (preinstalled).         |
+### 5.1 Case table
 
-Two third-party actions remain (one of them official GitHub). Dependabot and `bot-pin-action.yaml`
-keep working unchanged.
+`test/cases.json` holds every row, in two lists, `accept` and `reject`. A new case is one row: a name, a `stage`
+snippet that mutates a copy of the good `dist/`, the expected id, and a `released` flag for rows the
+stable version supports. The OS matrix for `valid` comes from `lib-get-test-matrix.yaml`.
 
-## 4. Tests: target state
+| Case                   | Stage                                        | Expected `failed-check` |
+| ---------------------- | -------------------------------------------- | ----------------------- |
+| `valid` (3 OSes)       | none                                         | empty, release verified |
+| `binary-mode-entry`    | rewrite `SHA256SUMS` with `shasum -b`        | empty                   |
+| `tampered-file`        | append to the sdist                          | `checksum`              |
+| `missing-sums`         | delete `SHA256SUMS`                          | `checksums-file`        |
+| `empty-sums`           | truncate `SHA256SUMS`                        | `checksums-file`        |
+| `malformed-line`       | add a line without a hash                    | `checksums-file`        |
+| `path-traversal`       | list `../x.whl`                              | `checksums-file`        |
+| `duplicate-entry`      | list the wheel twice                         | `checksums-file`        |
+| `disallowed-extension` | list a `.zip`                                | `checksums-file`        |
+| `unlisted-file`        | copy the wheel under another name            | `file-set`              |
+| `planted-bundle`       | add `evil.sigstore.json` (regression for F1) | `file-set`              |
+| `subdirectory`         | add `dist/sub/`                              | `file-set`              |
+| `listed-file-absent`   | delete the wheel, keep its entry             | `file-set`              |
+| `no-tag`               | run from a branch, `tag-name` unset          | `tag`                   |
+| `second-run`           | run the action twice on the same tag         | `release`               |
 
-Principle: test the security logic locally and cheaply; test the integration end-to-end once per OS.
+Review-only exceptions, listed under "Tests" in `CLAUDE.md`: step 1.1 (artifact download) and step 2.1
+(Sigstore signing, for example a missing `id-token` permission). Both are `unexpected`, and neither is
+a check of this action. The matrix cannot vary job permissions, so the OIDC case stays a documented
+manual check.
 
-### 4.1 Local script tests (new) **[CLAUDE.md]**
+### 5.2 Workflows
 
-`test/verify-dist.test.sh` plus a `make test` target (in the repo `Makefile`, outside `.make/`),
-using plain Bash and temporary directories, no new dependency. One case per rule in 3.3:
+```text
+ci.yaml                       unchanged entry point, calls ci-action.yaml with released: false
+nightly.yaml                  calls ci-action.yaml with released: true
+ci-action.yaml                one suite, input `released: boolean`, matrices from test/cases.json
+nightly-test-released.yaml    deleted
+lib-get-test-matrix.yaml      unchanged
+test/cases.json               all rows
+test/fixtures/pkg/            fixture, renamed, Makefile and tasks.py removed
+scripts/test-helper.sh        assertions; delete_dist_artifacts removed
+```
 
-| Case                                  | Expected                   |
-| ------------------------------------- | -------------------------- |
-| valid dist                            | exit 0, prints file names  |
-| valid dist, binary-mode `*name` entry | exit 0                     |
-| tampered file                         | exit 1, `checksum` error   |
-| unlisted `.whl` / `.tar.gz`           | exit 1                     |
-| planted `*.sigstore.json`             | exit 1 (regression for A1) |
-| subdirectory / hidden file            | exit 1                     |
-| missing `SHA256SUMS`                  | exit 1                     |
-| empty `SHA256SUMS`                    | exit 1                     |
-| entry listed but file absent          | exit 1                     |
-| entry with `../` or `/`               | exit 1                     |
-| duplicate entry                       | exit 1                     |
-| disallowed extension (`.zip`)         | exit 1                     |
+`ci-action.yaml` jobs:
 
-Each failure case asserts both the exit code **and** the `::error::` message (T3). It runs in the
-CI `format`/lint job on a Linux/macOS/Windows matrix in a few seconds and replaces the three
-`reject-*` runner jobs (T2). Bug fixes then get a regression test by adding one table row.
+1. `build`: `uv build test/fixtures/pkg --out-dir dist` (no copy into the repository root), generate
+   `SHA256SUMS`, upload `dist-base`. Built once for all cases.
+2. `sign` (OS matrix): create a throwaway release, run the action, assert the Sigstore bundles verify
+   with `--cert-identity` pinned to this workflow, assert the asset set is exactly the expected one,
+   always delete the release.
+3. `accept` and `reject` (matrix over `test/cases.json`, `ubuntu-latest`): download `dist-base`, run the
+   row's `stage`, upload it as `dist-<case>`, run the action with `dist-artifact-name: dist-<case>`
+   and `continue-on-error`, assert `failed-check` equals the expected id with `assert_failed_check`.
+   No per-case build, so a case costs one short job.
 
-### 4.2 End-to-end (one reusable workflow, `ci-action.yaml`)
+The action is invoked by two steps, `uses: ./` with `if: !inputs.released` and
+`uses: durandtibo/sign-pypi-package-action@<sha>` with `if: inputs.released`, read through
+`steps.local.outputs.x || steps.released.outputs.x`. This is the same approach as the build action. The
+released version in `v0.0.1` has no `failed-check` output, so until the next release the nightly runs
+only the rows marked `released`. At release time: set `released` rows, bump the SHA, and delete the
+helpers that only existed for the old tag.
 
-Keep **one** reusable workflow that has an input `action-ref`:
+### 5.3 Documentation
 
-- Empty (CI): `uses: ./`.
-- Set (nightly): check out this repository at that ref into `action/`, then `uses: ./action`.
-  Local actions are resolved at step time, so this works for any tag. The nightly caller resolves
-  the latest release tag itself (`gh release view --json tagName`), so there is no pinned SHA to
-  bump (T8).
+- **README:** remove `actions/checkout` from the `sign` job examples; pin examples to a full SHA with a
+  version comment and say "no floating tags"; add **Security model** (what is verified; the checksums
+  only prove the artifact was not changed between jobs, not that the build was trustworthy),
+  **Verifying a release** (`uvx sigstore verify github --repository <owner>/<repo> <file>`),
+  **Permissions**, the `failed-check` ids, and a **Migration** note (no `signatures` artifact; assets
+  are never overwritten).
+- **CLAUDE.md:** replace "logic lives inline" with a list of step ids, add the rule "every check calls
+  `fail <id> ...` and has a row in `test/cases.json`", the review-only exceptions, and the
+  `released` workflow input in place of `nightly-test-released.yaml`.
 
-This deletes `nightly-test-released.yaml` (T1) and the `delete_dist_artifacts` workaround and the
-`actions: write` permission it needs. Verify this works on runners before merging, as it cannot be
-tested locally.
+## 6. Properties check
 
-Jobs:
+| #   | Met by                                                                                                                     |
+| --- | -------------------------------------------------------------------------------------------------------------------------- |
+| P1  | Five unchanged responsibilities, none added. `signatures` artifact removed.                                                |
+| P2  | Checks 1.2 to 1.4 run before signing and each has a failing row. 0.2 runs before the download.                             |
+| P3  | `files` is produced once by 1.2, confirmed by 1.3, signed by 2.1 and released by 3.1. No glob after 1.3.                   |
+| P4  | One third-party signing action, pinned; `softprops` and `upload-artifact` removed. `gh` comes from the image.              |
+| P5  | Tag first, checksums before signing, no checkout, no second upload. Per-case jobs do not rebuild.                          |
+| P6  | All inline; steps of about 15 lines; three inputs, one output.                                                             |
+| P7  | Bash and `shasum` fallback only. Windows is in the `valid` matrix. **(confirm in CI)** `${RUNNER_TEMP}` paths in Git Bash. |
+| P8  | No fixed artifact name; download goes to `${RUNNER_TEMP}`; no `--clobber`.                                                 |
+| P9  | `env:` for every input and output; permissions documented; `github-token` explicit.                                        |
+| P10 | 15 rows, one per check reason; two explicit exceptions; one suite for local and released.                                  |
+| P11 | `fail` writes an annotation and a summary; `failed-check` published; tests assert ids.                                     |
+| P12 | Ten steps with `N.x` names and one failure id each.                                                                        |
 
-1. `build`: `uv build test/fixtures/pkg --out-dir dist` (no staging copy, T4), generate
-   `SHA256SUMS`, upload `dist`.
-2. `sign` (matrix: Linux, macOS, Windows): create throwaway release, run the action, then assert:
-   - bundles verify with `--cert-identity` of this workflow and the GitHub OIDC issuer (T7),
-   - release has exactly the expected assets (compare the full list, not four regexes),
-   - the action cannot overwrite: a second run fails (P4).
-     Always delete the throwaway release in an `if: always()` step.
-3. `reject-tampered` (ubuntu only): one end-to-end negative test that proves the verify step
-   is wired in before signing, asserting the failure comes from the **verify step** (check the step
-   `conclusion`, and that the sign step was skipped), not from any step. All other negative cases
-   live in 4.1.
+## 7. Considered and rejected
 
-Result: three jobs of E2E per workflow instead of six, and one workflow file instead of two.
+- **Verification in `scripts/verify-dist.sh` with a local `make test`.** The local feedback would be
+  faster, but it breaks P6 (all logic inline, one file to read) and P10 (a second test mechanism next to
+  the case table), and it diverges from the build action. The case table runs short jobs on
+  `ubuntu-latest`, which is enough. Revisit only if the checks grow past about 15 lines each.
+- **A `signatures-artifact-name` input.** No user needs it yet; `gh release download` covers the
+  chaining case. Add it when a user asks.
+- **`--clobber` for re-runs.** Convenient, but a re-run could replace an asset that was already
+  downloaded by consumers. Failing is the safe default and the message says how to recover.
+- **Checking the released tag out into `action/` and using `uses: ./action`.** Avoids the second `uses:`
+  step but differs from the build action. Same-repo consistency wins.
+- **Re-verifying the bundles after signing in the action.** It costs a network call for every caller and
+  Sigstore signing already fails closed. The test suite verifies them instead.
 
-### 4.3 Fixture and helper cleanup
+## 8. Migration order
 
-- Delete `test/fixtures/pkg/Makefile` and `tasks.py`. Rename the project to
-  `sign-pypi-package-action-fixture` (T5).
-- Keep `scripts/test-helper.sh` for E2E assertions only. Drop `delete_dist_artifacts` and
-  `assert_signatures_artifact_uploaded`. Replace the header comment (T6). Make
-  `assert_release_assets` compare the exact set.
+One PR per logical change, branched from `main`.
 
-## 5. Documentation changes
+| Order | Branch                              | Content                                                                            | Breaking               |
+| ----- | ----------------------------------- | ---------------------------------------------------------------------------------- | ---------------------- |
+| 1     | `feat/failed-check-and-checks`      | Steps 0.x, 1.x, 4.x, `failed-check` output, `test/cases.json` rows for 0.x and 1.x | No (stricter file-set) |
+| 2     | `refactor/release-with-gh-cli`      | Step 3.1, `github-token`, `release` rows, explicit sigstore flags                  | Yes (no overwrite)     |
+| 3     | `refactor/drop-signatures-artifact` | Remove the `upload-artifact` step                                                  | Yes                    |
+| 4     | `test/single-suite`                 | One `ci-action.yaml` with `released`, delete the nightly copy, fixture cleanup     | No                     |
+| 5     | `docs/readme-and-claude-md`         | README and `CLAUDE.md` from 5.3                                                    | No                     |
 
-### README
+Release 1 to 3 together as the next exact tag (for example `v0.1.0`) with the migration note. No
+floating tags.
 
-- Remove `actions/checkout` from the `sign` job examples (P9).
-- Pin examples to a full SHA with a `# v0.x.y` comment; say "do not use floating tags".
-- Add a short **Security model** section: what is verified (checksums, exact file set), what is not
-  (the content was trustworthy at build time; `SHA256SUMS` only protects the artifact in transit
-  between jobs).
-- Add **Verifying a release**: `uvx sigstore verify github --repository <owner>/<repo> <file>`.
-- Add **Permissions** table: `id-token: write`, `contents: write`.
-- Update the inputs table (new `github-token`, reworded `dist-artifact-name`) and remove every
-  mention of the `signatures` artifact.
-- Add a **Migration** note: the `signatures` artifact is gone; re-runs no longer overwrite assets.
+## 9. What was not done
 
-### CLAUDE.md
-
-- Replace "The logic lives inline in `action.yml`" with: steps in `action.yml`, verification in
-  `scripts/verify-dist.sh`.
-- Add `make test` to the environment list and the reporting list (it can be run locally).
-- Update "Tests": negative paths are covered by `test/verify-dist.test.sh`; E2E covers success,
-  overwrite refusal and one wired-in negative case.
-- Update workflow structure: no `nightly-test-released.yaml`, `nightly.yaml` calls `ci-action.yaml`
-  with `action-ref`. Note that `durandtibo/cancel-queued-runs-action` should be aligned the same
-  way, or the "mirror" rule relaxed.
-
-## 6. Migration plan (one PR per logical change, per CLAUDE.md)
-
-| Order | Branch                              | Content                                                                                                       | Breaking                  |
-| ----- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| 1     | `feat/verify-dist-script`           | `scripts/verify-dist.sh`, `test/verify-dist.test.sh`, `make test`, CI job, action uses the script (A1-A3, A9) | No                        |
-| 2     | `refactor/release-with-gh-cli`      | Replace `softprops`, add `github-token`, resolve/validate tag early, no overwrite (A5, A6, A8)                | Yes (overwrite behaviour) |
-| 3     | `refactor/drop-signatures-artifact` | Remove `upload-artifact` step and `signatures` artifact (A4)                                                  | Yes                       |
-| 4     | `test/merge-e2e-workflows`          | Single parametrised E2E workflow, delete nightly duplicate and workarounds, fixture cleanup (T1-T8)           | No                        |
-| 5     | `docs/readme-and-claude-md`         | README and CLAUDE.md updates from section 5                                                                   | No                        |
-
-Release the breaking changes (2, 3) together as a new exact tag, for example `v0.1.0`, with the
-migration note in the release text. No floating tags.
-
-## 7. Deliberately left unchanged
-
-- Composite action form and Bash-only steps (P5).
-- Keyless Sigstore via the official `sigstore/gh-action-sigstore-python` rather than a hand-rolled
-  `sigstore sign` call (it manages Python and the OIDC flow).
-- `SHA256SUMS` as the integrity contract between the build job and this action.
-- Workflow layout (`ci.yaml`, reusable `ci-*`, `lib-*`, `bot-*`, security workflows), `permissions: {}`
-  at workflow level, `timeout-minutes`, SHA pinning with ratchet comments.
-- `.make/` and the shared Makefile.
-
-## 8. Open points to confirm on a runner
-
-These cannot be validated locally and should be checked in the PRs before they are relied on:
-
-1. `uses: ./action` after a second `actions/checkout` with `path: action` (4.2), including on Windows.
-2. `gh release create --verify-tag` behaviour when the tag was pushed in the same workflow run.
-3. `gh release upload` without `--clobber` returns non-zero for an existing asset on all three OSes.
-4. `${GITHUB_ACTION_PATH}` expansion in a composite step on Windows with `shell: bash`.
+- Nothing was implemented or run on GitHub; every `(confirm in CI)` item is open.
+- The sketches in 4.3 are untested.
+- The `build-pypi-package-action` review was read for its properties and structure only. Aligning
+  `CLAUDE.md` rules that mention "mirror `cancel-queued-runs-action`" with it is left to the PRs above.
