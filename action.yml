@@ -32,7 +32,7 @@ inputs:
 outputs:
   failed-check:
     description: >
-      Id of the check that failed (tag, checksums-file, file-set, checksum), "unexpected" for any other failure,
+      Id of the check that failed (tag, checksums-file, file-set, checksum, permissions, bundle, release), "unexpected" for any other failure,
       empty on success.
     value: ${{ steps.report.outputs.failed-check }}
 
@@ -148,12 +148,38 @@ runs:
         out="$("${check[@]}" 2>&1)" || fail checksum "Checksum mismatch" "${out}" \
           "A file changed after SHA256SUMS was generated. Rebuild and re-run the build job."
 
-    - name: 2.1 Sign with Sigstore
+    - name: 2.1 Check signing permission
+      shell: bash
+      run: |
+        source "${RUNNER_TEMP}/fail.sh"
+        # The runner sets this only when the job has id-token: write. Checking here avoids
+        # downloading and verifying everything before Sigstore reports it.
+        [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || fail permissions "Cannot sign: no OIDC token" \
+          "The job has no id-token permission, so Sigstore keyless signing cannot work." \
+          "Add 'permissions: id-token: write' to the job that runs this action."
+
+    - name: 2.2 Sign with Sigstore
       uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # ratchet:sigstore/gh-action-sigstore-python@v3.5.0
       with:
         inputs: ${{ steps.sums.outputs.inputs }}
         release-signing-artifacts: false
         upload-signing-artifacts: false
+
+    - name: 2.3 Check signature bundles
+      shell: bash
+      env:
+        DIST: ${{ runner.temp }}/sign-pypi-package
+        FILES: ${{ steps.sums.outputs.files }}
+      run: |
+        source "${RUNNER_TEMP}/fail.sh"
+        DIST="${DIST//\\//}" # forward slashes on Windows too
+        cd "${DIST}" || exit
+        # Word splitting is intended: names are restricted to plain file names by step 1.2.
+        # shellcheck disable=SC2086
+        for f in ${FILES}; do
+          [ -s "${f}.sigstore.json" ] || fail bundle "Missing signature bundle" "${f}.sigstore.json was not written." \
+            "Check the Sigstore signing step above."
+        done
 
     - name: 3.1 Attach to release
       shell: bash

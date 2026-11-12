@@ -9,6 +9,9 @@
 #   dist-base, runs the action once or twice, asserts the exact failed-check id
 #   and, for a rejected run, that nothing was attached to the release. Not
 #   OS-dependent, so it only runs on ubuntu-latest.
+# - permissions: runs the action on the good dist in a job without id-token:
+#   write and asserts the "permissions" id (permissions are per job, so this
+#   check cannot be a row of the case job).
 #
 # The released version (v0.0.1) has neither the failed-check output nor the
 # dist-artifact-name input, so no row is flagged "released": true yet. At release
@@ -328,3 +331,32 @@ jobs:
         run: |
           source scripts/test-helper.sh
           for t in ${TAGS}; do delete_release_and_tag "${t}"; done
+
+  permissions:
+    # Without id-token: write the action must stop before signing, with the
+    # "permissions" id. The released v0.0.1 has no such check.
+    needs: [build]
+    if: ${{ !inputs.released }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read # no id-token on purpose
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Run sign action without id-token permission
+        id: sign
+        continue-on-error: true
+        uses: ./
+        with:
+          tag-name: ci-permissions-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-base
+
+      - name: Assert the permissions check failed
+        shell: bash
+        env:
+          ACTUAL: ${{ steps.sign.outputs.failed-check }}
+        run: |
+          source scripts/test-helper.sh
+          assert_failed_check "no-oidc" "permissions" "${ACTUAL}"

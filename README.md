@@ -37,7 +37,9 @@ Steps run in this order; each check that fails reports its id in the `failed-che
 | 1.2  | Checks `SHA256SUMS`: exists, strict line format, plain names, no dups       | `checksums-file` |
 | 1.3  | Checks the artifact holds exactly `SHA256SUMS` plus the listed files        | `file-set`       |
 | 1.4  | Verifies the checksums (`sha256sum`, or `shasum -a 256` on macOS)           | `checksum`       |
-| 2.1  | Signs the verified files with Sigstore (keyless OIDC)                       | `unexpected`     |
+| 2.1  | Checks that the job can get an OIDC token (`id-token: write`)               | `permissions`    |
+| 2.2  | Signs the verified files with Sigstore (keyless OIDC)                       | `unexpected`     |
+| 2.3  | Checks that every signed file has a non-empty `.sigstore.json` bundle       | `bundle`         |
 | 3.1  | Attaches files, bundles and `SHA256SUMS` to the release with `gh`           | `release`        |
 
 The same verified file list is checked, signed and released: nothing is globbed after step 1.3.
@@ -64,9 +66,9 @@ artifact. It removes its work directory first, so a run never sees the files of 
 
 ## Outputs
 
-| Name           | Description                                                                                                                                |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `failed-check` | Id of the failed check (`tag`, `checksums-file`, `file-set`, `checksum`, `release`), `unexpected` for any other failure, empty on success. |
+| Name           | Description                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `failed-check` | Id of the failed check (`tag`, `checksums-file`, `file-set`, `checksum`, `permissions`, `bundle`, `release`), `unexpected` for any other failure, empty on success. |
 
 A failure also writes an annotation and a job summary with the values involved and how to fix it.
 
