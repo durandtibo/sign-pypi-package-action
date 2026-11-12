@@ -23,6 +23,11 @@ inputs:
       distinct name to avoid colliding with the others in the same run.
     required: false
     default: "dist"
+  github-token:
+    description: >
+      Token used to create the release if needed and attach the assets. Needs contents: write.
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   failed-check:
@@ -98,10 +103,6 @@ runs:
         {
           echo "files=$(echo "${files}" | tr '\n' ' ')"
           echo "inputs=$(echo "${files}" | sed "s|^|${dist}/|" | tr '\n' ' ')"
-          echo "release-files<<EOF"
-          echo "${dist}/SHA256SUMS"
-          echo "${files}" | sed "s|^|${dist}/|; p; s|\$|.sigstore.json|"
-          echo "EOF"
         } >>"${GITHUB_OUTPUT}"
 
     - name: 1.3 Check distribution file set
@@ -113,7 +114,7 @@ runs:
         source "${RUNNER_TEMP}/fail.sh"
         cd "${DIST}" || exit
         # Word splitting is intended: names are restricted to plain file names by step 1.2.
-        # shellcheck disable=SC2086
+        # shellcheck disable=SC2086,SC2046
         expected="$(printf '%s\n' SHA256SUMS ${FILES} | sort)"
         # shellcheck disable=SC2012
         actual="$(ls -A | sort)"
@@ -141,13 +142,28 @@ runs:
       uses: sigstore/gh-action-sigstore-python@790bc6befb9d733738f18d8f895854b453640ec9 # ratchet:sigstore/gh-action-sigstore-python@v3.5.0
       with:
         inputs: ${{ steps.sums.outputs.inputs }}
+        release-signing-artifacts: false
+        upload-signing-artifacts: false
 
     - name: 3.1 Attach to release
-      uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # ratchet:softprops/action-gh-release@v3.0.4
-      with:
-        tag_name: ${{ steps.tag.outputs.tag }}
-        fail_on_unmatched_files: true
-        files: ${{ steps.sums.outputs.release-files }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        DIST: ${{ runner.temp }}/dist
+        TAG: ${{ steps.tag.outputs.tag }}
+        FILES: ${{ steps.sums.outputs.files }}
+      run: |
+        source "${RUNNER_TEMP}/fail.sh"
+        cd "${DIST}" || exit
+        gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1 ||
+          gh release create "${TAG}" --repo "${GITHUB_REPOSITORY}" --verify-tag --title "${TAG}" --notes "" ||
+          fail release "Cannot create release ${TAG}" "gh release create failed for tag ${TAG}." \
+            "Push the tag first and check that the token has contents: write."
+        # Word splitting is intended: names are restricted to plain file names by step 1.2.
+        # shellcheck disable=SC2086,SC2046
+        gh release upload "${TAG}" --repo "${GITHUB_REPOSITORY}" SHA256SUMS ${FILES} $(printf '%s.sigstore.json ' ${FILES}) ||
+          fail release "Cannot attach assets to ${TAG}" "gh release upload failed; an asset may already exist (assets are never overwritten)." \
+            "Delete the partial assets of ${TAG}, then re-run."
 
     - name: 4.1 Write job summary
       shell: bash
