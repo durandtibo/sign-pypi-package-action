@@ -15,12 +15,7 @@ inputs:
     default: ""
   dist-artifact-name:
     description: >
-      Name of the "dist" artifact to download (must match the name it was
-      uploaded under). Defaults to "dist" — the normal case. Set explicitly
-      only when a workflow run needs multiple candidate dist artifacts to
-      coexist, e.g. this action's own checksum-verification failure-path
-      tests, where each scenario uploads its own dist artifact under a
-      distinct name to avoid colliding with the others in the same run.
+      Name of the artifact that holds the distributions and SHA256SUMS.
     required: false
     default: "dist"
   github-token:
@@ -32,8 +27,8 @@ inputs:
 outputs:
   failed-check:
     description: >
-      Id of the check that failed (tag, checksums-file, file-set, checksum, permissions, bundle, release), "unexpected" for any other failure,
-      empty on success.
+      Id of the check that failed, "unexpected" for any other failure, empty on success. The ids
+      (tag, checksums-file, file-set, checksum, permissions, bundle, release) are listed in the README table.
     value: ${{ steps.report.outputs.failed-check }}
 
 runs:
@@ -219,10 +214,17 @@ runs:
       env:
         DIST: ${{ runner.temp }}/sign-pypi-package
         TAG: ${{ steps.tag.outputs.tag }}
+        FILES: ${{ steps.sums.outputs.files }}
       run: |
         DIST="${DIST//\\//}" # forward slashes on Windows too
+        # Names are plain file names (step 1.2), so word splitting and printing them is safe.
+        # shellcheck disable=SC2086
         {
-          printf '### :white_check_mark: Signed and released %s\n\n```text\n' "${TAG}"
+          printf '### :white_check_mark: Signed and released %s\n\n' "${TAG}"
+          printf 'Release: %s/%s/releases/tag/%s\n\nAssets:\n\n' "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${TAG}"
+          printf -- '- `%s`\n' SHA256SUMS SHA256SUMS.sigstore.json ${FILES} $(printf '%s.sigstore.json ' ${FILES})
+          printf '\nVerify a file:\n\n```bash\nuvx sigstore verify github --repository %s <file>\n```\n\n' "${GITHUB_REPOSITORY}"
+          printf 'SHA256SUMS:\n\n```text\n'
           cat "${DIST}/SHA256SUMS"
           printf '```\n'
         } >>"${GITHUB_STEP_SUMMARY}"
