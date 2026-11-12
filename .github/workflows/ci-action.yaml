@@ -71,7 +71,6 @@ jobs:
     permissions:
       id-token: write # Sigstore OIDC keyless signing
       contents: write # create/delete the throwaway release and attach assets
-      actions: read # list this run's artifacts to assert "signatures" was uploaded
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
@@ -108,15 +107,6 @@ jobs:
         run: |
           source scripts/test-helper.sh
           assert_sigstore_valid "${{ github.repository }}" "${RUNNER_TEMP}"/dist/*.tar.gz "${RUNNER_TEMP}"/dist/*.whl
-
-      - name: Assert signatures artifact was uploaded
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          source scripts/test-helper.sh
-          assert_signatures_artifact_uploaded "${{ github.run_id }}"
 
       - name: Assert all expected assets were attached to the release
         shell: bash

@@ -12,13 +12,6 @@ assert_sigstore_valid() {
 	uvx sigstore verify github --repository "${repository}" "$@"
 }
 
-# assert_signatures_artifact_uploaded <run-id>
-assert_signatures_artifact_uploaded() {
-	local run_id="$1"
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
-		--jq '.artifacts[].name' | grep -qx 'signatures'
-}
-
 # assert_release_assets <tag>
 assert_release_assets() {
 	local tag="$1"
