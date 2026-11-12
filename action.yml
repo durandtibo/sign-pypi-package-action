@@ -83,7 +83,7 @@ runs:
         DIST: ${{ runner.temp }}/dist
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        cd "${DIST}"
+        cd "${DIST}" || exit
         [ -s SHA256SUMS ] || fail checksums-file "SHA256SUMS missing or empty" \
           "No non-empty SHA256SUMS in artifact '${DIST##*/}'." \
           "Generate it at build time: sha256sum -- *.tar.gz *.whl > SHA256SUMS"
@@ -111,10 +111,11 @@ runs:
         FILES: ${{ steps.sums.outputs.files }}
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        cd "${DIST}"
+        cd "${DIST}" || exit
         # Word splitting is intended: names are restricted to plain file names by step 1.2.
         # shellcheck disable=SC2086
         expected="$(printf '%s\n' SHA256SUMS ${FILES} | sort)"
+        # shellcheck disable=SC2012
         actual="$(ls -A | sort)"
         [ "${expected}" = "${actual}" ] || fail file-set "Artifact does not match SHA256SUMS" \
           "$(diff <(echo "${expected}") <(echo "${actual}") || true)" \
@@ -126,7 +127,7 @@ runs:
         DIST: ${{ runner.temp }}/dist
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        cd "${DIST}"
+        cd "${DIST}" || exit
         # sha256sum is missing on macOS runners; shasum -a 256 works there and elsewhere.
         if command -v sha256sum >/dev/null 2>&1; then
           check=(sha256sum --check --strict SHA256SUMS)
