@@ -3,6 +3,30 @@
 # and the last released tag, so verification logic is written once.
 set -euo pipefail
 
+# create_release <tag>: a throwaway release (and its tag) on the current commit.
+create_release() {
+	local tag="$1"
+	gh release create "${tag}" \
+		--repo "${GITHUB_REPOSITORY}" \
+		--title "Test run ${tag} (throwaway, will be deleted)" \
+		--notes "Created by the CI workflow, safe to ignore/delete." \
+		--target "${GITHUB_SHA}"
+}
+
+# create_tag <tag>: a tag on the current commit, without a release.
+create_tag() {
+	local tag="$1"
+	gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/${tag}" -f "sha=${GITHUB_SHA}" >/dev/null
+}
+
+# delete_release_and_tag <tag>: remove what create_release or create_tag made.
+# Also removes a tag created by the action itself; never fails.
+delete_release_and_tag() {
+	local tag="$1"
+	gh release delete "${tag}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag >/dev/null 2>&1 || true
+	gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" >/dev/null 2>&1 || true
+}
+
 # assert_sigstore_valid <repository> <file>...
 assert_sigstore_valid() {
 	local repository="$1"
@@ -21,6 +45,21 @@ assert_release_assets() {
 			exit 1
 		}
 	done
+}
+
+# assert_no_assets <tag>
+# A rejected run must stop before signing and releasing: the release has no
+# assets, or does not exist. An empty tag (no tag given) passes.
+assert_no_assets() {
+	local tag="$1" assets
+	[ -n "${tag}" ] || return 0
+	if ! assets="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' 2>/dev/null)"; then
+		return 0
+	fi
+	[ -z "${assets}" ] || {
+		echo "::error::release ${tag} has assets after a rejected run: ${assets}"
+		exit 1
+	}
 }
 
 # assert_failure <label> <actual-outcome>
