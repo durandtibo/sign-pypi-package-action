@@ -65,7 +65,7 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
     targets).
   - `ci-action.yaml`: the one end-to-end suite, with a `released` input. `released: false` tests this
     checkout (`uses: ./`), `released: true` the pinned last release. The `sign` job covers
-    Linux/macOS/Windows; the `accept`, `reject` and `repeat` jobs are matrices over `test/cases.json`.
+    Linux/macOS/Windows; the `case` job is a matrix over the flat list in `test/cases.json`.
 - `nightly.yaml`: scheduled entry point (and manual runs) calling `ci-action.yaml` with
   `released: true`, to catch regressions in what users run today.
 - `ci-verify-workflows.yaml`: lints the workflow files themselves. It has its own triggers and is not
@@ -93,9 +93,11 @@ Conventions:
 
 - Every behaviour of `action.yml` must be covered by an end-to-end job in `ci-action.yaml`, which
   also runs against the released tag for rows flagged `"released": true`.
-- Every check calls `fail <id> ...` and has a row in `test/cases.json` (`accept`, `reject` or
-  `repeat`) with the expected `failed-check` id. A new case is one row: `name`, a `stage` snippet
-  that mutates a copy of the good `dist/`, `expected`, and optionally `released` / `no_tag`.
+- Every check calls `fail <id> ...` and has a row in `test/cases.json` with the expected
+  `failed-check` id. A new case is one row: `name`, a `stage` snippet that mutates a copy of the good
+  `dist/`, `expected` (`""` = accepted), and optionally `released`, `runs` (`2` runs the action twice)
+  and `tag` (`new` default, `same`, `unreleased`, `missing`, `none`; see the `case` job). A rejected
+  single run must also leave no asset on the release.
 - Tests assert the `failed-check` id, never the message text.
 - Review-only exceptions, because they are third-party and can only end in `unexpected`: step 1.1
   (artifact download) and step 2.1 (Sigstore signing, for example a missing `id-token` permission).

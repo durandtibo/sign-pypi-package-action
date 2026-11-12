@@ -5,9 +5,10 @@
 # - build: builds the fixture package once and uploads it as "dist-base".
 # - sign: across Linux/macOS/Windows, creates a throwaway release, runs the
 #   action, verifies the Sigstore bundles and the asset set, deletes the release.
-# - accept / reject / repeat: one job per row of test/cases.json. Each stages a
-#   modified copy of dist-base and asserts the exact failed-check id. They are
-#   not OS-dependent so only run on ubuntu-latest.
+# - case: one job per row of test/cases.json. Each stages a modified copy of
+#   dist-base, runs the action once or twice, asserts the exact failed-check id
+#   and, for a rejected run, that nothing was attached to the release. Not
+#   OS-dependent, so it only runs on ubuntu-latest.
 #
 # The released version (v0.0.1) has neither the failed-check output nor the
 # dist-artifact-name input, so no row is flagged "released": true yet. At release
@@ -40,9 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      accept: ${{ steps.cases.outputs.accept }}
-      reject: ${{ steps.cases.outputs.reject }}
-      repeat: ${{ steps.cases.outputs.repeat }}
+      cases: ${{ steps.cases.outputs.cases }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
@@ -62,9 +61,7 @@ jobs:
           RELEASED: ${{ inputs.released }}
         run: |
           # With released: true only the rows flagged "released" run.
-          for list in accept reject repeat; do
-            echo "${list}=$(jq -c --argjson r "${RELEASED}" ".${list} | map(select(\$r == false or .released == true))" test/cases.json)"
-          done >> "$GITHUB_OUTPUT"
+          echo "cases=$(jq -c --argjson r "${RELEASED}" 'map(select($r == false or .released == true))' test/cases.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload distributions for the cases
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
@@ -156,20 +153,30 @@ jobs:
           TAG: ${{ steps.release.outputs.tag }}
         run: gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag || true
 
-  accept:
-    # Rows of test/cases.json that the action must accept: it runs to the end
-    # (throwaway release included) and reports no failed check.
+  case:
+    # One row of test/cases.json per job. Row fields: name, stage (shell snippet
+    # that mutates a copy of the good dist/), expected (failed-check id, "" =
+    # accepted), and optionally released, runs (1 default, 2 = run the action
+    # twice) and tag:
+    #   new         (default) a throwaway release and tag exist
+    #   same        like new; with runs: 2 the second run reuses the tag
+    #   unreleased  the tag exists but the release does not (the action creates it)
+    #   missing     neither the tag nor the release exists
+    #   none        tag-name is left unset, as in a run that is not a tag push
+    # With runs: 2 the first run uses the good dist-base on the tag and the
+    # second one the staged artifact: a second tag for "new", the tag for "same".
+    # Rows are asserted on the last run; the first run must succeed.
     needs: [build]
-    if: needs.build.outputs.accept != '[]'
+    if: needs.build.outputs.cases != '[]'
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.build.outputs.accept) }}
+        include: ${{ fromJson(needs.build.outputs.cases) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       id-token: write # Sigstore OIDC keyless signing
-      contents: write # create/delete the throwaway release and attach assets
+      contents: write # create/delete the throwaway release and tag, attach assets
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
@@ -193,186 +200,35 @@ jobs:
           path: case-dist/
           retention-days: 1
 
-      - name: Create throwaway release
-        id: release
+      - name: Create throwaway tag and release
+        id: setup
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ci-accept-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          gh release create "${TAG}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "Test run ${TAG} (throwaway, will be deleted)" \
-            --notes "Created by the CI workflow, safe to ignore/delete." \
-            --target "${GITHUB_SHA}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Run sign action (this checkout)
-        id: sign-local
-        if: ${{ !inputs.released }}
-        continue-on-error: true
-        uses: ./
-        with:
-          tag-name: ${{ steps.release.outputs.tag }}
-          dist-artifact-name: dist-${{ matrix.name }}
-
-      - name: Run sign action (released)
-        id: sign-released
-        if: ${{ inputs.released }}
-        continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
-        with:
-          tag-name: ${{ steps.release.outputs.tag }}
-          dist-artifact-name: dist-${{ matrix.name }}
-
-      - name: Assert no check failed
-        shell: bash
-        env:
-          LABEL: ${{ matrix.name }}
-          EXPECTED: ${{ matrix.expected }}
-          RELEASED: ${{ inputs.released }}
-          ACTUAL: ${{ steps.sign-local.outputs.failed-check }}
-          OUTCOME: ${{ steps.sign-released.outcome }}
+          KIND: ${{ matrix.tag || 'new' }}
+          RUNS: ${{ matrix.runs || 1 }}
+          BASE: ci-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           source scripts/test-helper.sh
-          # The released version has no failed-check output: only its outcome is known.
-          if [ "${RELEASED}" = "true" ]; then
-            if [ -z "${EXPECTED}" ]; then
-              assert_success "${LABEL}" "${OUTCOME}"
-            else
-              assert_failure "${LABEL}" "${OUTCOME}"
-            fi
-          else
-            assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
-          fi
-
-      - name: Delete throwaway release and tag
-        if: always()
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
-        run: gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag || true
-
-  reject:
-    # Rows of test/cases.json that the action must reject with the expected
-    # failed-check id, before signing or touching a release. Needs no
-    # id-token/contents: write permissions since it never reaches those steps.
-    needs: [build]
-    if: needs.build.outputs.reject != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.build.outputs.reject) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
-
-      - name: Download base distributions
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # ratchet:actions/download-artifact@v8.0.2
-        with:
-          name: dist-base
-          path: case-dist
-
-      - name: Stage case
-        shell: bash
-        env:
-          STAGE: ${{ matrix.stage }}
-        run: cd case-dist && bash -euo pipefail -c "${STAGE}"
-
-      - name: Upload staged distributions
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
-        with:
-          name: dist-${{ matrix.name }}
-          path: case-dist/
-          retention-days: 1
-
-      - name: Resolve tag
-        id: tag
-        shell: bash
-        env:
-          NO_TAG: ${{ matrix.no_tag }}
-          TAG: ci-reject-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          # no_tag rows leave tag-name unset: the run is not a tag push.
-          if [ "${NO_TAG}" = "true" ]; then TAG=""; fi
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Run sign action (this checkout)
-        id: sign-local
-        if: ${{ !inputs.released }}
-        continue-on-error: true
-        uses: ./
-        with:
-          tag-name: ${{ steps.tag.outputs.tag }}
-          dist-artifact-name: dist-${{ matrix.name }}
-
-      - name: Run sign action (released)
-        id: sign-released
-        if: ${{ inputs.released }}
-        continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
-        with:
-          tag-name: ${{ steps.tag.outputs.tag }}
-          dist-artifact-name: dist-${{ matrix.name }}
-
-      - name: Assert the expected check failed
-        shell: bash
-        env:
-          LABEL: ${{ matrix.name }}
-          EXPECTED: ${{ matrix.expected }}
-          RELEASED: ${{ inputs.released }}
-          ACTUAL: ${{ steps.sign-local.outputs.failed-check }}
-          OUTCOME: ${{ steps.sign-released.outcome }}
-        run: |
-          source scripts/test-helper.sh
-          # The released version has no failed-check output: only its outcome is known.
-          if [ "${RELEASED}" = "true" ]; then
-            if [ -z "${EXPECTED}" ]; then
-              assert_success "${LABEL}" "${OUTCOME}"
-            else
-              assert_failure "${LABEL}" "${OUTCOME}"
-            fi
-          else
-            assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL}"
-          fi
-
-  repeat:
-    # Rows of test/cases.json where the action runs twice on the same tag:
-    # the first run must succeed and the second must fail with the expected
-    # id, because release assets are never overwritten.
-    needs: [build]
-    if: needs.build.outputs.repeat != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.build.outputs.repeat) }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      id-token: write # Sigstore OIDC keyless signing
-      contents: write # create/delete the throwaway release and attach assets
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
-
-      - name: Create throwaway release
-        id: release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ci-repeat-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          gh release create "${TAG}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "Test run ${TAG} (throwaway, will be deleted)" \
-            --notes "Created by the CI workflow, safe to ignore/delete." \
-            --target "${GITHUB_SHA}"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          case "${KIND}" in
+            none) tag="" ;;
+            missing | unreleased | new | same) tag="${BASE}" ;;
+            *)
+              echo "::error::unknown tag kind '${KIND}' in test/cases.json"
+              exit 1
+              ;;
+          esac
+          # The tag of the second run: the same one for "same", a new one for "new".
+          tag2="${tag}"
+          if [ "${RUNS}" = "2" ] && [ "${KIND}" = "new" ]; then tag2="${BASE}-2"; fi
+          for t in "${tag}" "${tag2}"; do
+            [ -n "${t}" ] || continue
+            case "${KIND}" in
+              new | same) create_release "${t}" ;;
+              unreleased) create_tag "${t}" ;;
+            esac
+          done
+          { echo "tag=${tag}"; echo "tag2=${tag2}"; } >>"${GITHUB_OUTPUT}"
 
       - name: Run sign action (first run) (this checkout)
         id: first-local
@@ -380,8 +236,8 @@ jobs:
         continue-on-error: true
         uses: ./
         with:
-          tag-name: ${{ steps.release.outputs.tag }}
-          dist-artifact-name: dist-base
+          tag-name: ${{ steps.setup.outputs.tag }}
+          dist-artifact-name: ${{ matrix.runs == 2 && 'dist-base' || format('dist-{0}', matrix.name) }}
 
       - name: Run sign action (first run) (released)
         id: first-released
@@ -389,43 +245,79 @@ jobs:
         continue-on-error: true
         uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
-          tag-name: ${{ steps.release.outputs.tag }}
-          dist-artifact-name: dist-base
+          tag-name: ${{ steps.setup.outputs.tag }}
+          dist-artifact-name: ${{ matrix.runs == 2 && 'dist-base' || format('dist-{0}', matrix.name) }}
 
-      - name: Run sign action (second run, same tag) (this checkout)
+      - name: Run sign action (second run) (this checkout)
         id: second-local
-        if: ${{ !inputs.released }}
+        if: ${{ !inputs.released && matrix.runs == 2 }}
         continue-on-error: true
         uses: ./
         with:
-          tag-name: ${{ steps.release.outputs.tag }}
-          dist-artifact-name: dist-base
+          tag-name: ${{ steps.setup.outputs.tag2 }}
+          dist-artifact-name: dist-${{ matrix.name }}
 
-      - name: Run sign action (second run, same tag) (released)
+      - name: Run sign action (second run) (released)
         id: second-released
-        if: ${{ inputs.released }}
+        if: ${{ inputs.released && matrix.runs == 2 }}
         continue-on-error: true
         uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
         with:
-          tag-name: ${{ steps.release.outputs.tag }}
-          dist-artifact-name: dist-base
+          tag-name: ${{ steps.setup.outputs.tag2 }}
+          dist-artifact-name: dist-${{ matrix.name }}
 
-      - name: Assert first run succeeded and second run failed
+      - name: Assert the expected check failed
         shell: bash
         env:
           LABEL: ${{ matrix.name }}
           EXPECTED: ${{ matrix.expected }}
-          FIRST: ${{ steps.first-local.outputs.failed-check }}
-          SECOND: ${{ steps.second-local.outputs.failed-check }}
+          RUNS: ${{ matrix.runs || 1 }}
+          RELEASED: ${{ inputs.released }}
+          FIRST_ID: ${{ steps.first-local.outputs.failed-check }}
+          SECOND_ID: ${{ steps.second-local.outputs.failed-check }}
+          FIRST_OUTCOME: ${{ steps.first-released.outcome }}
+          SECOND_OUTCOME: ${{ steps.second-released.outcome }}
         run: |
           source scripts/test-helper.sh
-          assert_failed_check "${LABEL} (first run)" "" "${FIRST}"
-          assert_failed_check "${LABEL} (second run)" "${EXPECTED}" "${SECOND}"
+          # The released version has no failed-check output: only its outcome is known.
+          if [ "${RELEASED}" = "true" ]; then
+            last="${FIRST_OUTCOME}"
+            if [ "${RUNS}" = "2" ]; then
+              assert_success "${LABEL} (first run)" "${FIRST_OUTCOME}"
+              last="${SECOND_OUTCOME}"
+            fi
+            if [ -z "${EXPECTED}" ]; then
+              assert_success "${LABEL}" "${last}"
+            else
+              assert_failure "${LABEL}" "${last}"
+            fi
+          else
+            last="${FIRST_ID}"
+            if [ "${RUNS}" = "2" ]; then
+              assert_failed_check "${LABEL} (first run)" "" "${FIRST_ID}"
+              last="${SECOND_ID}"
+            fi
+            assert_failed_check "${LABEL}" "${EXPECTED}" "${last}"
+          fi
 
-      - name: Delete throwaway release and tag
+      - name: Assert a rejected run attached nothing
+        # A single rejected run must stop before signing and releasing, so its
+        # release (if any) has no assets. With runs: 2 the first run attaches some.
+        if: ${{ matrix.expected != '' && (matrix.runs || 1) == 1 }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.setup.outputs.tag }}
+        run: |
+          source scripts/test-helper.sh
+          assert_no_assets "${TAG}"
+
+      - name: Delete throwaway releases and tags
         if: always()
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.release.outputs.tag }}
-        run: gh release delete "${TAG}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag || true
+          TAGS: ${{ steps.setup.outputs.tag }} ${{ steps.setup.outputs.tag2 }}
+        run: |
+          source scripts/test-helper.sh
+          for t in ${TAGS}; do delete_release_and_tag "${t}"; done
