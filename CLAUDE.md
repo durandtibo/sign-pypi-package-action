@@ -10,7 +10,7 @@ attaches them, with their signatures, to a GitHub release. It downloads the `dis
 everything to the release with `gh` (assets are never overwritten). The logic lives inline in `action.yml`
 (bash steps that must work on Linux, macOS and Windows runners), in steps named `N.x` by topic:
 `0.1` failure helper, `0.2` tag, `1.1` download, `1.2` SHA256SUMS, `1.3` file set, `1.4` checksums,
-`2.1` sign, `3.1` release, `4.1` summary, `4.2` report. One purpose and one failure id per step. End-to-end testing is done by
+`2.1` signing permission, `2.2` sign, `2.3` bundles, `3.1` release, `4.1` summary, `4.2` report. One purpose and one failure id per step. End-to-end testing is done by
 workflows against a throwaway release, using the fixture package in `test/fixtures/pkg/` and the shared
 assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 
@@ -102,7 +102,12 @@ Conventions:
 - The escaping of `fail` (annotation and summary) is tested locally and in the `build` job by
   `assert_fail_helper_escapes`, which runs the helper extracted from `action.yml` on hostile text.
 - Review-only exceptions, because they are third-party and can only end in `unexpected`: step 1.1
-  (artifact download) and step 2.1 (Sigstore signing, for example a missing `id-token` permission).
+  (artifact download) and step 2.2 (Sigstore signing).
+- Step 2.3 (bundle check) has no row: Sigstore cannot succeed without writing the bundle. It is a
+  guard against a change of the signing action. If a row becomes possible (for example a stub
+  signing action), move it into the table.
+- Step 2.1 (`permissions`) cannot share the `case` job, because permissions are per job: it has its
+  own `permissions` job without `id-token`.
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
 - Every bug fix needs a regression test that fails without the fix.
 - If a check fails for a real reason, report it rather than weakening the test.
