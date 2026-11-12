@@ -35,6 +35,16 @@
     "expected": "checksums-file"
   },
   {
+    "name": "hostile-line",
+    "stage": "echo '%0A::error::x ``` ~~~~~~ not-a-hash' >> SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
+    "name": "crlf-sums",
+    "stage": "sed -i 's/$/\\r/' SHA256SUMS",
+    "expected": "checksums-file"
+  },
+  {
     "name": "disallowed-extension",
     "stage": "printf '%064d  evil.zip\\n' 0 >> SHA256SUMS",
     "expected": "checksums-file"

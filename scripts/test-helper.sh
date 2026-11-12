@@ -62,6 +62,48 @@ assert_no_assets() {
 	}
 }
 
+# assert_single_error <log-file>
+# The log of a failing step holds exactly one "::error" command, and untrusted
+# text could not add another or change it: '%' is escaped.
+assert_single_error() {
+	local log="$1" count
+	count="$(grep -c '^::error' "${log}" || true)"
+	[ "${count}" = 1 ] || {
+		echo "::error::expected exactly one ::error line, got ${count}"
+		exit 1
+	}
+	grep -qF '%250A::error::x' "${log}" || {
+		echo "::error::'%' in the details was not escaped in the annotation"
+		exit 1
+	}
+}
+
+# assert_fail_helper_escapes <action.yml>
+# Runs the failure helper of step 0.1 on hostile details (a fake workflow command,
+# a CR, a fence) and checks the annotation and the summary. Needs no GitHub runner.
+assert_fail_helper_escapes() {
+	local action="$1" dir hostile
+	dir="$(mktemp -d)"
+	awk '/<<.EOF.$/ {f=1; next} /^ *EOF$/ {f=0} f' "${action}" >"${dir}/fail.sh"
+	hostile=$'line %0A::error::x\r\n``` ~~~~~~ end'
+	(RUNNER_TEMP="${dir}" GITHUB_STEP_SUMMARY="${dir}/summary" \
+		bash -c 'source "${RUNNER_TEMP}/fail.sh"; fail test-id "A title" "$1" "A fix"' _ "${hostile}") >"${dir}/log" || true
+	assert_single_error "${dir}/log"
+	grep -qF '%0D' "${dir}/log" || {
+		echo "::error::CR in the details was not escaped in the annotation"
+		exit 1
+	}
+	[ "$(cat "${dir}/failed-check")" = test-id ] || {
+		echo "::error::failed-check was not written"
+		exit 1
+	}
+	grep -qx '~~~~~~~text' "${dir}/summary" || {
+		echo "::error::the summary fence is not longer than the '~' run of the details"
+		exit 1
+	}
+	rm -rf "${dir}"
+}
+
 # assert_failure <label> <actual-outcome>
 assert_failure() {
 	local label="$1" actual_outcome="$2"
