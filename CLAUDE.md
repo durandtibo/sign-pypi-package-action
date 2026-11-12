@@ -76,7 +76,7 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 - `security-dependency-review.yaml`: dependency review on pull requests.
 - `bot-*.yaml`: scheduled automation (pin actions, sync `.make/`, format files, cancel stale queued runs).
 - `security-scorecard.yaml`: OSSF Scorecard analysis (needs the `TIBOT_*` GitHub App secrets).
-- `.github/dependabot.yml` keeps pip, uv and GitHub Actions dependencies up to date.
+- `.github/dependabot.yml` keeps the GitHub Actions dependencies up to date (the repository has no Python project at the root, so no pip or uv entries).
 
 The workflow names and structure mirror `durandtibo/cancel-queued-runs-action` and
 `durandtibo/build-pypi-package-action` (the sibling action that builds the `dist` artifact and
