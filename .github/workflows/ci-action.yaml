@@ -205,6 +205,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       id-token: write # Sigstore OIDC keyless signing
+      actions: read # list the staged artifact
       contents: write # create/delete the throwaway release and tag, attach assets
     steps:
       - name: Checkout
@@ -229,6 +230,26 @@ jobs:
           path: case-dist/
           retention-days: 1
           include-hidden-files: true # the hidden-file row stages a dotfile
+
+      - name: Wait until the staged artifact is visible
+        # The artifact service is eventually consistent: a download right after the upload can
+        # fail with "Artifact not found", which the action under test would report as unexpected.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: dist-${{ matrix.name }}
+        run: |
+          for _ in $(seq 1 30); do
+            n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              --jq "[.artifacts[] | select(.name == \"${NAME}\")] | length" || echo 0)
+            if [ "${n}" != "0" ]; then
+              sleep 5 # the download backend can lag behind the listing
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::artifact ${NAME} did not become visible"
+          exit 1
 
       - name: Create throwaway tag and release
         id: setup
