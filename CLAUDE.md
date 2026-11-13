@@ -11,7 +11,7 @@ everything to the release with `gh` (assets are never overwritten). The logic li
 (bash steps that must work on Linux and macOS runners (Windows is not supported)), in steps named `N.x` by topic:
 `0.1` failure helper, `0.2` tag, `1.1` download, `1.2` SHA256SUMS, `1.3` file set, `1.4` checksums,
 `2.1` signing permission, `2.2` sign, `2.3` bundles, `3.1` release, `4.1` summary, `4.2` report. One purpose and one failure id per step. End-to-end testing is done by
-workflows against a throwaway release, using the fixture package in `test/fixtures/pkg/` and the shared
+workflows against throwaway draft releases (see "Tests"), using the fixture package in `test/fixtures/pkg/` and the shared
 assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
 
 ## Environment
@@ -104,9 +104,16 @@ Conventions:
   `failed-check` id. A new case is one row: `name`, a `stage` snippet that mutates a copy of the good
   `dist/`, `expected` (`""` = accepted), and optionally `released`, `runs` (`2` runs the action twice)
   `artifact` (download another artifact than the staged one) and `tag` (`new` default, `same`,
-  `unreleased`, `missing`, `none`, `dash`, `space`, `draft`; see the `case` job). A rejected single run
+  `missing`, `none`, `dash`, `space`, `draft`; see the `case` job). A rejected single run
   must also leave no asset on the release, and an accepted run must leave exactly the expected assets,
   byte-identical to the dist (`assert_release_matches_dist`).
+- Never create public releases or tags in tests: they are permanent noise on the repository's releases
+  and tags pages. Tests only create draft releases (`create_draft_release`: visible to writers only, no
+  tag) and delete them in an `if: always()` step. The title of every throwaway
+  release must include `(throwaway, will be deleted)`, which `make clean-throwaway-releases` matches. Behaviour that needs a real tag, such as the action
+  creating and publishing a release, is tested in `scripts/test-steps.sh` against a stub `gh`. Do not
+  add a test that pushes a tag or publishes a release; `make clean-throwaway-releases` only removes
+  the old ones.
 - Tests assert the `failed-check` id, never the message text.
 - The escaping of `fail` (annotation and summary) is tested locally and in `ci-shell.yaml` by
   `assert_fail_helper_escapes`, which runs the helper extracted from `action.yml` on hostile text.

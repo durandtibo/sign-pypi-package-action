@@ -76,12 +76,6 @@
     "tag": "none"
   },
   {
-    "name": "action-creates-release",
-    "stage": ":",
-    "expected": "",
-    "tag": "unreleased"
-  },
-  {
     "name": "tag-not-pushed",
     "stage": ":",
     "expected": "release",

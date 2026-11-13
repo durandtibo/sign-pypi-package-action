@@ -13,37 +13,24 @@ extract_step() {
 	' "$1"
 }
 
-# create_release <tag> [extra gh flag...]: a throwaway release (and its tag) on the current commit.
-create_release() {
-	local tag="$1"
-	shift
-	gh release create "${tag}" \
-		--repo "${GITHUB_REPOSITORY}" \
-		--title "Test run ${tag} (throwaway, will be deleted)" \
-		--notes "Created by the CI workflow, safe to ignore/delete." \
-		--target "${GITHUB_SHA}" \
-		"$@"
-}
-
-# create_draft_release <tag>: a draft release on an existing tag, as a user could create beforehand.
+# create_draft_release <tag>: a draft release for the tag, as a user could create beforehand.
+# Drafts are visible only to people with write access and create no tag (the tag would be
+# created when publishing), so the tests leave nothing on the public releases or tags pages.
 create_draft_release() {
 	local tag="$1"
-	create_tag "${tag}"
-	create_release "${tag}" --draft --verify-tag
+	gh release create "${tag}" \
+		--repo "${GITHUB_REPOSITORY}" \
+		--draft \
+		--title "Test run ${tag} (throwaway, will be deleted)" \
+		--notes "Draft created by the CI workflow, deleted at the end of the run." \
+		--target "${GITHUB_SHA}"
 }
 
-# create_tag <tag>: a tag on the current commit, without a release.
-create_tag() {
+# delete_release <tag>: remove a draft made by create_draft_release; never fails.
+# The title marker "(throwaway, will be deleted)" is what `make clean-throwaway-releases` matches.
+delete_release() {
 	local tag="$1"
-	gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/${tag}" -f "sha=${GITHUB_SHA}" >/dev/null
-}
-
-# delete_release_and_tag <tag>: remove what create_release or create_tag made.
-# Also removes a tag created by the action itself; never fails.
-delete_release_and_tag() {
-	local tag="$1"
-	gh release delete "${tag}" --repo "${GITHUB_REPOSITORY}" --yes --cleanup-tag >/dev/null 2>&1 || true
-	gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" >/dev/null 2>&1 || true
+	gh release delete "${tag}" --repo "${GITHUB_REPOSITORY}" --yes >/dev/null 2>&1 || true
 }
 
 # assert_sigstore_valid <repository> <file>...
@@ -123,17 +110,6 @@ assert_no_release() {
 		echo "::error::release ${tag} exists after a run that must not create one"
 		exit 1
 	fi
-}
-
-# assert_release_published <tag>
-# A release created by the action is public once it is done, not left as a draft.
-assert_release_published() {
-	local tag="$1" draft
-	draft="$(gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
-	[ "${draft}" = "false" ] || {
-		echo "::error::release ${tag} is not published (isDraft=${draft})"
-		exit 1
-	}
 }
 
 # assert_no_assets <tag>

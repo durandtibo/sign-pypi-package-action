@@ -28,5 +28,5 @@ jobs:
       released: true
     permissions:
       actions: read # list the staged artifact
-      contents: write # create/delete the throwaway release and attach assets
+      contents: write # create/delete the throwaway draft release and attach assets
       id-token: write # Sigstore OIDC keyless signing
