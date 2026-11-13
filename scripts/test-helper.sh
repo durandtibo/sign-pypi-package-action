@@ -105,6 +105,39 @@ assert_fake_release_matches_dist() {
 	done
 }
 
+# use_fake_gh <store> <seed kind> <tag>: for a workflow job. Seeds the store of test/fake-gh for the
+# tag (see fake_gh_seed) and puts the fake gh first on the PATH of the later steps of the job, the
+# steps of composite actions included, and tells it where its store is.
+use_fake_gh() {
+	local store="$1" root
+	root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+	fake_gh_seed "$@"
+	echo "${root}/test/fake-gh" >>"${GITHUB_PATH}"
+	echo "FAKE_GH_ROOT=${store}" >>"${GITHUB_ENV}"
+}
+
+# assert_fake_gh_used <store>: the action called the fake gh to attach assets. Without it a PATH
+# that did not apply would let the action call the real gh and the test could pass by accident.
+assert_fake_gh_used() {
+	grep -q '^release upload ' "$1/calls.log" 2>/dev/null || {
+		echo "::error::the fake gh was not called to upload assets: the PATH did not apply to the action"
+		exit 1
+	}
+}
+
+# assert_fake_release_verifies <store> <tag> <repository>
+# What a consumer does with the assets of the release: verify each one with its bundle.
+assert_fake_release_verifies() {
+	local store="$1" tag="$2" repository="$3" tmp f files=()
+	tmp="$(mktemp -d)"
+	cp "${store}/${tag}/assets/"* "${tmp}/"
+	for f in "${tmp}"/*.tar.gz "${tmp}"/*.whl "${tmp}/SHA256SUMS"; do
+		[ -e "${f}" ] && files+=("${f}")
+	done
+	assert_sigstore_valid "${repository}" "${files[@]}"
+	rm -rf "${tmp}"
+}
+
 # create_draft_release <tag>: a draft release for the tag, as a user could create beforehand.
 # Drafts are visible only to people with write access and create no tag (the tag would be
 # created when publishing), so the tests leave nothing on the public releases or tags pages.

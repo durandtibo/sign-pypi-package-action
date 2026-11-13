@@ -417,6 +417,9 @@ check "case tags are known" "" "$(jq -r '.[] | select(.tag != null and (.tag | I
 check "rows that need the fakes are local" "" "$(jq -r '.[] | select(((.tag // "") | IN("published","tagged")) or .["gh-fail"] != null or .sign != null or .oidc != null or .ref != null) | select(.local != true) | .name' "${root}/test/cases.json")"
 check "no row is both local and integration" "" "$(jq -r '.[] | select(.local == true and .integration == true) | .name' "${root}/test/cases.json")"
 check "no local row is flagged released" "" "$(jq -r '.[] | select(.local == true and .released == true) | .name' "${root}/test/cases.json")"
+# The case job runs the integration rows with no release, no gh and no staging: they must name the
+# artifact to download and be rejected before any release call.
+check "integration rows name an artifact and are rejected" "" "$(jq -r '.[] | select(.integration == true and (.artifact == null or .expected == "" or .runs != null or .tag != null)) | .name' "${root}/test/cases.json")"
 check "case artifacts are integration rows" "" "$(jq -r '.[] | select(.artifact != null and .integration != true) | .name' "${root}/test/cases.json")"
 check "fake gh failures are known verbs" "" "$(jq -r '.[] | select(.["gh-fail"] != null and (.["gh-fail"] | IN("view","create","upload","edit","delete") | not)) | .name' "${root}/test/cases.json")"
 check "fake signer modes are known" "" "$(jq -r '.[] | select(.sign != null and (.sign | test("^(all|none|skip:.+|empty:.+)$") | not)) | .name' "${root}/test/cases.json")"
