@@ -68,9 +68,13 @@ assertions and fakes in `scripts/test-helper.sh`, and the fake `gh` in `test/fak
   - `ci-format.yaml`: the format check (`make format`, no diff allowed) and the whole `make lint`.
   - `ci-shell.yaml`: runs `make test-local` and the escaping assertion of the `fail` helper on
     Linux/macOS, from the same `test-matrix`.
-  - `ci-action.yaml`: the one end-to-end suite, with a `released` input. `released: false` tests this
-    checkout (`uses: ./`), `released: true` the pinned last release. The `sign` job covers
-    Linux/macOS; the `case` job is a matrix over the flat list in `test/cases.json`.
+  - `ci-action.yaml`: the integration tier, with `released` and `real-release` inputs. `released: false`
+    tests this checkout (`uses: ./`), `released: true` the pinned last release. The `sign` job covers
+    Linux/macOS with the fake `gh`; the `release` job is the real-release contract test (skipped when
+    `real-release` is false); the `case` job is a matrix over the `"integration"` rows of
+    `test/cases.json`; the `permissions` job has no `id-token`.
+  - `changes` (a job of `ci.yaml`, not a workflow): sets `real-release` to false for pull requests that
+    touch nothing that could make the fake `gh` drift from the real one (see "Tests").
 - `nightly.yaml`: scheduled entry point (and manual runs) calling `ci-action.yaml` with
   `released: true`, to catch regressions in what users run today.
 - `ci-verify-workflows.yaml`: lints the workflow files themselves. It has its own triggers and is not
@@ -89,7 +93,7 @@ Conventions:
 - Every workflow has `permissions: {}` at the workflow level; give jobs the narrowest permissions they need, including jobs that call a reusable
   workflow.
 - Reusable workflows that need no input also have `workflow_dispatch`, so they can be run alone;
-  `ci-action.yaml` takes the `test-matrix` and `released` inputs from its caller.
+  `ci-action.yaml` takes the `test-matrix`, `released` and `real-release` inputs from its caller.
 - Put `make` targets in the steps rather than duplicating commands, so local runs and CI match.
 - Start each file with a comment saying what it does, and update it when the behaviour changes.
 - When a released tag is bumped, update the pinned SHA and ratchet comment of the released action in `ci-action.yaml`,
@@ -98,20 +102,29 @@ Conventions:
 
 ## Tests
 
-- Every behaviour of `action.yml` must be covered by an end-to-end job in `ci-action.yaml`, which
-  also runs against the released tag for rows flagged `"released": true`.
+- There are two tiers. The unit tier (`make test-local`, below) runs every row of `test/cases.json`
+  against fakes, makes no GitHub API call and is where every behaviour and edge case of `action.yml`
+  must be covered. The integration tier (`ci-action.yaml`) has few jobs and covers only what needs the
+  real services: the artifact download, Sigstore signing and verification, the missing `id-token`
+  permission and the real `gh` (the contract test of the fake). It also runs against the released tag
+  for the rows flagged `"released": true`. Do not add a job per row or a call to the GitHub API to the
+  integration tier: the token has a rate limit shared by all runs (`HTTP 403: API rate limit exceeded`),
+  so a new edge case is a row of the unit tier.
 - Every check calls `fail <id> ...` and has a row in `test/cases.json` with the expected
   `failed-check` id. A new case is one row: `name`, a `stage` snippet that mutates a copy of the good
   `dist/`, `expected` (`""` = accepted), and optionally `released`, `runs` (`2` runs the action twice)
   `artifact` (download another artifact than the staged one, with `"integration": true`) and `tag` (`new` default, `same`,
-  `missing`, `none`, `dash`, `space`, `draft`; see the `case` job), and the `local` fields below. A rejected single run
+  `missing`, `none`, `dash`, `space`, `draft`), and the `local` fields below. A rejected single run
   must also leave no asset on the release, and an accepted run must leave exactly the expected assets,
-  byte-identical to the dist (`assert_release_matches_dist`).
+  byte-identical to the dist (`assert_fake_release_matches_dist`; `assert_release_matches_dist` for the
+  real release of the `release` job). The `case` job of `ci-action.yaml` runs only the rows flagged
+  `"integration": true`, which name an `artifact` to download and must be rejected before any release
+  call, so that job needs no release, no `gh` and no staging.
 - Never create public releases or tags in tests: they are permanent noise on the repository's releases
-  and tags pages. Tests only create draft releases (`create_draft_release`: visible to writers only, no
-  tag) and delete them in an `if: always()` step. The title of every throwaway
+  and tags pages. Only the `release` job of `ci-action.yaml` creates a release, a draft
+  (`create_draft_release`: visible to writers only, no tag), and deletes it in an `if: always()` step. The title of every throwaway
   release must include `(throwaway, will be deleted)`, which `make clean-throwaway-releases` matches. Behaviour that needs a real tag, such as the action
-  creating and publishing a release, is tested in `scripts/test-steps.sh` against a stub `gh`. Do not
+  creating and publishing a release, is tested in the unit tier against the fake `gh`. Do not
   add a test that pushes a tag or publishes a release; `make clean-throwaway-releases` only removes
   the old ones.
 - Tests assert the `failed-check` id, never the message text.
@@ -119,8 +132,15 @@ Conventions:
   `assert_fail_helper_escapes`, which runs the helper extracted from `action.yml` on hostile text.
 - Review-only exception: step 2.2 (Sigstore signing) is third-party and can only end in `unexpected`.
   Step 1.1 (artifact download) is covered by the `missing-artifact` row.
-- The `sign` job also checks what a consumer does: the assets downloaded from the release verify
-  with their bundles (`assert_release_verifies`).
+- The `sign` job runs the action with the fake `gh` (`use_fake_gh`: a release in a local store, no API
+  call, no `contents: write`) and the real download and signing, and also checks what a consumer does:
+  the assets of the release verify with their bundles (`assert_fake_release_verifies`). The `release` job
+  does the same with a real draft release (`assert_release_verifies`), on Linux for this checkout and on
+  every OS for the released tag: `v0.0.1` attaches with `softprops/action-gh-release`, which calls the API
+  and not `gh`, so the fake cannot stand in for it and `sign` is skipped for it. The `release` job is
+  skipped on pull requests that change none of `action.yml`, `test/fake-gh/`, `test/fixtures/`,
+  `scripts/test-helper.sh`, `scripts/fake-runner.sh` or the workflows that run them (the `changes` job of
+  `ci.yaml`).
 - `make test-local` is the unit tier. It needs no runner and makes no API call, and has two parts.
   `scripts/test-local.sh` runs every row of the table through the whole action with
   `scripts/fake-runner.sh`: the real steps, extracted from `action.yml`, run in order against a fake
@@ -141,8 +161,9 @@ Conventions:
   action creates and publishes one: a public release that the end-to-end tests must never make), and the
   fields `gh-fail` (a verb of the fake `gh` that fails), `sign` (a mode of `fake_sigstore_sign`), `oidc`
   (`false` = no `id-token`) and `ref` (`tag` = a tag push without the `tag-name` input).
-- Step 2.1 (`permissions`) cannot share the `case` job, because permissions are per job: it has its
-  own `permissions` job without `id-token`.
+- Step 2.1 (`permissions`) cannot be tested for real in the `case` job, because permissions are per job:
+  the integration tier has its own `permissions` job without `id-token`. The unit tier has the
+  `no-id-token` row.
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
 - `test/fake-gh/fake-gh.sh` (the `gh` symlink next to it) is a stateful fake of the `gh release` calls of
   `action.yml` over a directory (`FAKE_GH_ROOT`); any other call exits 99. A new `gh` call in the action

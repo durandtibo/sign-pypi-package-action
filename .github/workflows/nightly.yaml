@@ -27,6 +27,5 @@ jobs:
       test-matrix: ${{ needs.get-matrix.outputs.test_matrix }}
       released: true
     permissions:
-      actions: read # list the staged artifact
       contents: write # create/delete the throwaway draft release and attach assets
       id-token: write # Sigstore OIDC keyless signing

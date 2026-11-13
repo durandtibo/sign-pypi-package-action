@@ -48,14 +48,48 @@ jobs:
     permissions:
       contents: read
 
+  # Decide whether this run needs the release job of ci-action.yaml, which creates a throwaway draft
+  # release with the real gh (a few API calls). The pull requests that change nothing that could make
+  # the fake gh of the tests drift from the real one skip it; every other trigger runs it.
+  changes:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      real-release: ${{ steps.diff.outputs.real-release }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+        with:
+          fetch-depth: 0 # the base of a pull request must be reachable for the diff
+
+      - name: Decide whether the release job runs
+        id: diff
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          real=true
+          if [ "${EVENT}" = pull_request ]; then
+            changed="$(git diff --name-only "${BASE_SHA}" HEAD)"
+            # What the real gh behaviour matters to: the action, the fake, the fixtures and the workflows that run them.
+            if ! grep -qE '^(action\.yml|test/fake-gh/|test/fixtures/|scripts/(test-helper|fake-runner)\.sh|\.github/workflows/(ci|ci-action|nightly)\.yaml)' <<<"${changed}"; then
+              real=false
+            fi
+          fi
+          echo "real-release=${real}" >>"${GITHUB_OUTPUT}"
+          echo "real-release=${real}"
+
   # Test the action from the current repository code (not released yet) on multiple OS
   action:
-    needs: get-matrix
+    needs: [get-matrix, changes]
     uses: ./.github/workflows/ci-action.yaml
     with:
       test-matrix: ${{ needs.get-matrix.outputs.test_matrix }}
       released: false
+      real-release: ${{ needs.changes.outputs.real-release == 'true' }}
     permissions:
-      actions: read # list the staged artifact
-      contents: write # create/delete the throwaway draft release and attach assets
+      contents: write # create/delete the throwaway draft release of the release job
       id-token: write # Sigstore OIDC keyless signing
