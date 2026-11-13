@@ -45,7 +45,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       cases: ${{ steps.cases.outputs.cases }}
     steps:
@@ -93,7 +93,7 @@ jobs:
       matrix:
         os: ${{ fromJson(inputs.test-matrix).os_matrix }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       id-token: write # Sigstore OIDC keyless signing
       contents: write # create/delete the throwaway release and attach assets
@@ -431,7 +431,7 @@ jobs:
     needs: [build]
     if: ${{ !inputs.released }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read # no id-token on purpose
     steps:
