@@ -25,7 +25,7 @@ one contract. P2, P4, P8 and P9 are sharpened by this review.
 | P4  | **Reproducible**   | Every third-party action is pinned to a SHA. Nothing but the signing action installs anything at run time. No cache. Only `bash`, `gh` and `sha256sum`/`shasum` from the runner image are assumed.                                                                     |
 | P5  | **Fast**           | Local checks run before network calls (tag, checksums, permissions, then Sigstore). No checkout, no second artifact upload. Sigstore signing is the only slow step and runs once.                                                                                      |
 | P6  | **Simple**         | All logic is inline in `action.yml`, in steps of about 15 lines. Three inputs, one output. Tests are one table and one workflow, not copies.                                                                                                                           |
-| P7  | **Portable**       | Same behaviour on Linux, macOS and Windows (Git Bash). Keep the `shasum -a 256` fallback.                                                                                                                                                                              |
+| P7  | **Portable**       | Same behaviour on Linux and macOS (Windows is not supported). Keep the `shasum -a 256` fallback.                                                                                                                                                                       |
 | P8  | **Safe to chain**  | Re-entrant: the action can run several times in one job, with different artifacts, after the build action, and leaves no state that changes the next run. Fixed paths are cleaned first. It never touches the caller's workspace and never overwrites a release asset. |
 | P9  | **Secure**         | Inputs and step outputs reach scripts through `env:` only. Untrusted text (file names, `SHA256SUMS` lines) is escaped before it becomes a workflow command. The caller grants `id-token: write` and `contents: write` only. The only secret is `github.token`.         |
 | P10 | **Tested**         | Every check has one table row proving it fails with its `failed-check` id, or is a listed review-only exception. A check no row can fail does not exist. Every bug fix has a regression row. Tests are written once.                                                   |
@@ -183,7 +183,7 @@ Not investigated further; it needs its own PR.
 
 - `0.2` only rejects tags that start with `-` or contain whitespace. That is enough for `gh` argument
   safety and is kept.
-- `1.2` rejects `SHA256SUMS` written with CRLF (a Windows build that did not use Git Bash) as a malformed
+- `1.2` rejects `SHA256SUMS` written with CRLF (a file written with Windows line endings) as a malformed
   line, which is correct (fail closed) but the fix text should say "use LF line endings".
 - The test fixture `test/fixtures/pkg/` builds one sdist and one wheel; a second wheel would exercise
   the list handling (sorting, word splitting) with more than two files. Add one pure-Python wheel tag
@@ -389,20 +389,20 @@ Listed under "Tests" in `CLAUDE.md`; add to it:
 
 ## 7. Properties check
 
-| #   | Met by                                                                                                                                                 |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| P1  | Same five responsibilities; only `SHA256SUMS` gets a bundle too. No build, no PyPI, no notes.                                                          |
-| P2  | 0.2, 1.x, 2.1 all before the first network write; F2 removes the half-released state; reject rows assert nothing was attached.                         |
-| P3  | One list from 1.2, confirmed by 1.3, signed in 2.2 with `SHA256SUMS`, checked by 2.3, released in 3.1.                                                 |
-| P4  | One third-party signing action, pinned; `gh` and `shasum` from the image. **(confirm)** whether the signing action pins its own `sigstore` version.    |
-| P5  | Tag, checksums and permission are local checks; one signing run; no checkout or upload.                                                                |
-| P6  | All inline; steps of 8 to 20 lines; three inputs, one output; tests shrink from four near-identical jobs to one.                                       |
-| P7  | Bash only; `shasum` fallback; Windows in the `valid` matrix. **(confirm in CI)** `${RUNNER_TEMP}` paths and `ACTIONS_ID_TOKEN_REQUEST_URL` on Windows. |
-| P8  | Work directory removed in 0.1 and namespaced (F1); `chained-runs` row; no `--clobber`; only a draft created by this run is ever deleted.               |
-| P9  | `env:` for every input; complete escaping (F6) with a hostile-input row; permissions documented.                                                       |
-| P10 | 20 rows, one per failure reason, bug-fix rows for F1 and F6; exceptions listed in 5.3.                                                                 |
-| P11 | One id table in the README, same ids in `action.yml`; success summary with URL, assets and verify command.                                             |
-| P12 | Twelve steps, `N.x` names, one id each.                                                                                                                |
+| #   | Met by                                                                                                                                              |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1  | Same five responsibilities; only `SHA256SUMS` gets a bundle too. No build, no PyPI, no notes.                                                       |
+| P2  | 0.2, 1.x, 2.1 all before the first network write; F2 removes the half-released state; reject rows assert nothing was attached.                      |
+| P3  | One list from 1.2, confirmed by 1.3, signed in 2.2 with `SHA256SUMS`, checked by 2.3, released in 3.1.                                              |
+| P4  | One third-party signing action, pinned; `gh` and `shasum` from the image. **(confirm)** whether the signing action pins its own `sigstore` version. |
+| P5  | Tag, checksums and permission are local checks; one signing run; no checkout or upload.                                                             |
+| P6  | All inline; steps of 8 to 20 lines; three inputs, one output; tests shrink from four near-identical jobs to one.                                    |
+| P7  | Bash only; `shasum` fallback; Linux and macOS in the `valid` matrix.                                                                                |
+| P8  | Work directory removed in 0.1 and namespaced (F1); `chained-runs` row; no `--clobber`; only a draft created by this run is ever deleted.            |
+| P9  | `env:` for every input; complete escaping (F6) with a hostile-input row; permissions documented.                                                    |
+| P10 | 20 rows, one per failure reason, bug-fix rows for F1 and F6; exceptions listed in 5.3.                                                              |
+| P11 | One id table in the README, same ids in `action.yml`; success summary with URL, assets and verify command.                                          |
+| P12 | Twelve steps, `N.x` names, one id each.                                                                                                             |
 
 ## 8. Migration order
 

@@ -54,8 +54,7 @@ while IFS='|' read -r name expected kind runs stage; do
 	# Rows that need a release, a second run or signing are for ci-action.yaml.
 	case "${kind}" in none | dash | space | new) ;; *) continue ;; esac
 	[ "${runs}" = 1 ] || continue
-	# jq on Windows ends lines with CRLF, which base64 rejects.
-	stage="$(printf '%s' "${stage%$'\r'}" | base64 --decode)"
+	stage="$(printf '%s' "${stage}" | base64 --decode)"
 	actual="$(run_case "${name}" "${stage}" "${kind}")"
 	ran=$((ran + 1))
 	if [ "${actual}" = "${expected}" ]; then

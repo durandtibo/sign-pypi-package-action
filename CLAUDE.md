@@ -8,7 +8,7 @@ A GitHub composite action (`action.yml`) that signs Python package distributions
 attaches them, with their signatures, to a GitHub release. It downloads the `dist` artifact, verifies
 `SHA256SUMS` (failing closed on mismatches or unlisted files), signs with keyless OIDC and attaches
 everything to the release with `gh` (assets are never overwritten). The logic lives inline in `action.yml`
-(bash steps that must work on Linux, macOS and Windows runners), in steps named `N.x` by topic:
+(bash steps that must work on Linux and macOS runners (Windows is not supported)), in steps named `N.x` by topic:
 `0.1` failure helper, `0.2` tag, `1.1` download, `1.2` SHA256SUMS, `1.3` file set, `1.4` checksums,
 `2.1` signing permission, `2.2` sign, `2.3` bundles, `3.1` release, `4.1` summary, `4.2` report. One purpose and one failure id per step. End-to-end testing is done by
 workflows against a throwaway release, using the fixture package in `test/fixtures/pkg/` and the shared
@@ -67,10 +67,10 @@ assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
     `durandtibo/workflow-config-action` once and passes them down as `test-matrix`.
   - `ci-format.yaml`: the format check (`make format`, no diff allowed) and the whole `make lint`.
   - `ci-shell.yaml`: runs `make test-local` and the escaping assertion of the `fail` helper on
-    Linux/macOS/Windows, from the same `test-matrix`.
+    Linux/macOS, from the same `test-matrix`.
   - `ci-action.yaml`: the one end-to-end suite, with a `released` input. `released: false` tests this
     checkout (`uses: ./`), `released: true` the pinned last release. The `sign` job covers
-    Linux/macOS/Windows; the `case` job is a matrix over the flat list in `test/cases.json`.
+    Linux/macOS; the `case` job is a matrix over the flat list in `test/cases.json`.
 - `nightly.yaml`: scheduled entry point (and manual runs) calling `ci-action.yaml` with
   `released: true`, to catch regressions in what users run today.
 - `ci-verify-workflows.yaml`: lints the workflow files themselves. It has its own triggers and is not

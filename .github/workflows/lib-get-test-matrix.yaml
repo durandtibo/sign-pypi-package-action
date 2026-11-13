@@ -6,8 +6,8 @@ name: Get Test Matrix
 # updated in one place (that action's config) instead of being duplicated
 # across every test-* workflow.
 #
-# os_matrix contains the Linux, macOS and Windows runners (os_all), because this
-# action is tested on all three.
+# os_matrix contains the Linux and macOS runners (os_all without the Windows
+# ones): Windows runners are not supported by this action.
 #
 # Usage:
 #   jobs:
@@ -56,7 +56,7 @@ jobs:
           test_matrix=$(jq -nc \
             --argjson python_versions "$PYTHON_VERSIONS" \
             --argjson python_versions_standard "$PYTHON_VERSIONS_STANDARD" \
-            --argjson os_matrix "$OS_ALL" \
+            --argjson os_matrix "$(jq -c 'map(select(test("windows") | not))' <<<"$OS_ALL")" \
             --argjson os_macos "$OS_MACOS" \
             '{python_versions: $python_versions, python_versions_standard: $python_versions_standard, os_matrix: $os_matrix, os_macos: $os_macos}')
           echo "test_matrix=$test_matrix" >> "$GITHUB_OUTPUT"

@@ -91,7 +91,6 @@ runs:
         ARTIFACT: ${{ inputs.dist-artifact-name }}
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        DIST="${DIST//\\//}" # forward slashes on Windows too
         cd "${DIST}" || exit
         [ -s SHA256SUMS ] || fail checksums-file "SHA256SUMS missing or empty" \
           "No non-empty SHA256SUMS in artifact '${ARTIFACT}'." \
@@ -116,7 +115,6 @@ runs:
         FILES: ${{ steps.sums.outputs.files }}
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        DIST="${DIST//\\//}" # forward slashes on Windows too
         cd "${DIST}" || exit
         # Word splitting is intended: names are restricted to plain file names by step 1.2.
         # shellcheck disable=SC2086,SC2046
@@ -133,7 +131,6 @@ runs:
         DIST: ${{ runner.temp }}/sign-pypi-package
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        DIST="${DIST//\\//}" # forward slashes on Windows too
         cd "${DIST}" || exit
         # sha256sum is missing on macOS runners; shasum -a 256 works there and elsewhere.
         if command -v sha256sum >/dev/null 2>&1; then
@@ -168,7 +165,6 @@ runs:
         FILES: ${{ steps.sums.outputs.files }}
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        DIST="${DIST//\\//}" # forward slashes on Windows too
         cd "${DIST}" || exit
         # Word splitting is intended: names are restricted to plain file names by step 1.2.
         # shellcheck disable=SC2086
@@ -186,7 +182,6 @@ runs:
         FILES: ${{ steps.sums.outputs.files }}
       run: |
         source "${RUNNER_TEMP}/fail.sh"
-        DIST="${DIST//\\//}" # forward slashes on Windows too
         cd "${DIST}" || exit
         # A release that this run creates stays a draft until all assets are attached, so a failure
         # never leaves a public release that looks complete. A release that already exists is only
@@ -216,7 +211,6 @@ runs:
         TAG: ${{ steps.tag.outputs.tag }}
         FILES: ${{ steps.sums.outputs.files }}
       run: |
-        DIST="${DIST//\\//}" # forward slashes on Windows too
         # Names are plain file names (step 1.2), so word splitting and printing them is safe.
         # shellcheck disable=SC2086
         {

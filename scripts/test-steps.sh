@@ -140,7 +140,7 @@ for t in bash env cat grep sed sort uniq tr awk shasum perl ls diff dirname rm h
 	p="$(command -v "${t}" || true)"
 	if [ -n "${p}" ]; then ln -s "${p}" "${shim}/${t}"; fi
 done
-if [ "${OS:-}" != Windows_NT ] && [ -x "${shim}/shasum" ] && [ -x "${shim}/bash" ] &&
+if [ -x "${shim}/shasum" ] && [ -x "${shim}/bash" ] &&
 	! PATH="${shim}" "${shim}/bash" -c 'command -v sha256sum' >/dev/null 2>&1 &&
 	PATH="${shim}" "${shim}/bash" -c 'shasum -a 256 </dev/null' >/dev/null 2>&1; then
 	STEP_BASH="${shim}/bash"

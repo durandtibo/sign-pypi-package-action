@@ -27,6 +27,10 @@ catches problems before a release goes out with bad assets:
 - Release assets are never overwritten, and a release that the action creates stays a draft until all
   assets are attached.
 
+## Supported runners
+
+Linux and macOS runners are supported and tested. Windows runners are not supported.
+
 ## How it works
 
 Steps run in this order; each check that fails reports its id in the `failed-check` output.
