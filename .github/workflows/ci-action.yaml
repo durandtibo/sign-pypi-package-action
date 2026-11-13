@@ -252,8 +252,11 @@ jobs:
           # The tag of the second run: the same one for "same", a new one for "new".
           tag2="${tag}"
           if [ "${RUNS}" = "2" ] && [ "${KIND}" = "new" ]; then tag2="${BASE}-2"; fi
+          # Prepare each distinct tag once: creating the same release twice fails with HTTP 422.
           for t in "${tag}" "${tag2}"; do
             [ -n "${t}" ] || continue
+            [ "${t}" != "${prev:-}" ] || continue
+            prev="${t}"
             case "${KIND}" in
               new | same) create_release "${t}" ;;
               unreleased) create_tag "${t}" ;;
