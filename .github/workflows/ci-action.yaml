@@ -123,6 +123,7 @@ jobs:
         uses: ./
         with:
           tag-name: ${{ steps.release.outputs.tag }}
+          dist-artifact-name: dist-base
 
       - name: Run sign action (released)
         if: ${{ inputs.released }}
