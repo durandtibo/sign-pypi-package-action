@@ -77,6 +77,8 @@ assertions and fakes in `scripts/test-helper.sh`, and the fake `gh` in `test/fak
     touch nothing that could make the fake `gh` drift from the real one (see "Tests").
 - `nightly.yaml`: scheduled entry point (and manual runs) calling `ci-action.yaml` with
   `released: true`, to catch regressions in what users run today.
+  It also calls `ci-contract.yaml`: the contract test between this checkout and the pinned
+  `build-pypi-package-action` (its artifact, the missing `SHA256SUMS`, then signing to the fake `gh`).
 - `ci-verify-workflows.yaml`: lints the workflow files themselves. It has its own triggers and is not
   called from `ci.yaml`, so it can be a required check.
 - `security-dependency-review.yaml`: dependency review on pull requests.
@@ -85,8 +87,9 @@ assertions and fakes in `scripts/test-helper.sh`, and the fake `gh` in `test/fak
 - `.github/dependabot.yml` keeps the GitHub Actions dependencies up to date (the repository has no Python project at the root, so no pip or uv entries).
 
 The workflow names and structure mirror `durandtibo/cancel-queued-runs-action` and
-`durandtibo/build-pypi-package-action` (the sibling action that builds the `dist` artifact and
-`SHA256SUMS` this one consumes); keep them aligned.
+`durandtibo/build-pypi-package-action` (the sibling action that builds the `dist` artifact this one
+consumes; since its v0.1.0 that artifact holds only the wheel and the sdist, without the `SHA256SUMS` this
+one requires, see `ci-contract.yaml`); keep them aligned.
 
 Conventions:
 
@@ -141,6 +144,10 @@ Conventions:
   skipped on pull requests that change none of `action.yml`, `test/fake-gh/`, `test/fixtures/`,
   `scripts/test-helper.sh`, `scripts/fake-runner.sh` or the workflows that run them (the `changes` job of
   `ci.yaml`).
+- `ci-contract.yaml` (nightly) is the one place that builds with `build-pypi-package-action` instead of a
+  plain `uv build`: it checks the artifact layout this action relies on and that the artifact as the
+  sibling leaves it is refused with `checksums-file`. Keep the sibling pinned to a SHA, and when a failure
+  there shows a change of the sibling, read its changelog before changing the tests.
 - `make test-local` is the unit tier. It needs no runner and makes no API call, and has two parts.
   `scripts/test-local.sh` runs every row of the table through the whole action with
   `scripts/fake-runner.sh`: the real steps, extracted from `action.yml`, run in order against a fake

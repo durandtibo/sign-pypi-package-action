@@ -1,5 +1,6 @@
 # Nightly workflow testing the latest released action, to catch regressions in
-# what consumers pick up. The current (unreleased) code is tested nightly by ci.yaml.
+# what consumers pick up. The current (unreleased) code is tested nightly by ci.yaml. It also runs the
+# contract test between the current code and build-pypi-package-action (ci-contract.yaml).
 #
 # Permissions are set at the job level, not the workflow level.
 
@@ -28,4 +29,11 @@ jobs:
       released: true
     permissions:
       contents: write # create/delete the throwaway draft release and attach assets
+      id-token: write # Sigstore OIDC keyless signing
+
+  # Test the contract between this action and the build action that produces its input
+  test-contract:
+    uses: ./.github/workflows/ci-contract.yaml
+    permissions:
+      contents: read
       id-token: write # Sigstore OIDC keyless signing
