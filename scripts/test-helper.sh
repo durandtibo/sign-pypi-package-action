@@ -146,11 +146,11 @@ assert_wheel_and_sdist_only() {
 	files="$(find "${dir}" -mindepth 1 | wc -l | tr -d ' ')"
 	wheels="$(find "${dir}" -mindepth 1 -maxdepth 1 -name '*.whl' | wc -l | tr -d ' ')"
 	sdists="$(find "${dir}" -mindepth 1 -maxdepth 1 -name '*.tar.gz' | wc -l | tr -d ' ')"
-	[ "${files}" = 2 ] && [ "${wheels}" = 1 ] && [ "${sdists}" = 1 ] || {
+	if [ "${files}" != 2 ] || [ "${wheels}" != 1 ] || [ "${sdists}" != 1 ]; then
 		echo "::error::${dir} must hold exactly one wheel and one sdist, found ${wheels} wheel(s), ${sdists} sdist(s) among ${files} file(s):"
 		find "${dir}" -mindepth 1
 		exit 1
-	}
+	fi
 }
 
 # create_draft_release <tag>: a draft release for the tag, as a user could create beforehand.

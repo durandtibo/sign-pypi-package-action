@@ -344,7 +344,7 @@ for kind in new same draft published tagged missing none dash space; do
 	tagged) exp="v1 absent" ;;
 	*) exp=" absent" ;;
 	esac
-	check "seed ${kind}" "${exp}" "$(cat "${sd}/store/tags" | tr -d '\n') $(state "${sd}/store")"
+	check "seed ${kind}" "${exp}" "$(tr -d '\n' <"${sd}/store/tags") $(state "${sd}/store")"
 done
 rm -rf "${sd}/store"
 check "an unknown seed kind is refused" 1 "$(fake_gh_seed "${sd}/store" bogus v1 >/dev/null 2>&1 && echo 0 || echo 1)"
