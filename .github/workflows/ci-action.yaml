@@ -3,7 +3,7 @@
 # (released: true), so the two never drift apart.
 #
 # - build: builds the fixture package once and uploads it as "dist-base".
-# - sign: across Linux/macOS/Windows, creates a throwaway release, runs the
+# - sign: across Linux/macOS, creates a throwaway release, runs the
 #   action, verifies the Sigstore bundles, that the release holds exactly the
 #   expected assets (byte-identical to the dist) and that a consumer can verify
 #   the downloaded assets, then deletes the release.
