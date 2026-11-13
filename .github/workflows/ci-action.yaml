@@ -93,7 +93,7 @@ jobs:
       matrix:
         os: ${{ fromJson(inputs.test-matrix).os_matrix }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       id-token: write # Sigstore OIDC keyless signing
       contents: write # create/delete the throwaway release and attach assets
@@ -205,6 +205,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       id-token: write # Sigstore OIDC keyless signing
+      actions: read # list the staged artifact
       contents: write # create/delete the throwaway release and tag, attach assets
     steps:
       - name: Checkout
@@ -228,6 +229,28 @@ jobs:
           name: dist-${{ matrix.name }}
           path: case-dist/
           retention-days: 1
+          include-hidden-files: true # the hidden-file row stages a dotfile
+
+      - name: Wait until the staged artifact is visible
+        # The artifact service is eventually consistent: a download right after the upload can
+        # fail with "Artifact not found", which the action under test would report as unexpected.
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NAME: dist-${{ matrix.name }}
+        run: |
+          for _ in $(seq 1 30); do
+            # Filter by name: the unfiltered listing is paginated (30 per page) and the run has more artifacts.
+            n=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              -f name="${NAME}" --jq '.artifacts | length' 2>/dev/null || echo 0)
+            if [ "${n}" != "0" ]; then
+              sleep 5 # the download backend can lag behind the listing
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::artifact ${NAME} did not become visible"
+          exit 1
 
       - name: Create throwaway tag and release
         id: setup
@@ -252,8 +275,11 @@ jobs:
           # The tag of the second run: the same one for "same", a new one for "new".
           tag2="${tag}"
           if [ "${RUNS}" = "2" ] && [ "${KIND}" = "new" ]; then tag2="${BASE}-2"; fi
+          # Prepare each distinct tag once: creating the same release twice fails with HTTP 422.
           for t in "${tag}" "${tag2}"; do
             [ -n "${t}" ] || continue
+            [ "${t}" != "${prev:-}" ] || continue
+            prev="${t}"
             case "${KIND}" in
               new | same) create_release "${t}" ;;
               unreleased) create_tag "${t}" ;;
@@ -405,7 +431,7 @@ jobs:
     needs: [build]
     if: ${{ !inputs.released }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read # no id-token on purpose
     steps:
