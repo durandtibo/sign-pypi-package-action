@@ -1,0 +1,145 @@
+# Contract test between this action and durandtibo/build-pypi-package-action, the sibling action that
+# builds the distributions this one signs. The tests of this repository build with a plain `uv build`
+# to stay independent of the sibling, so a change in what the sibling produces would otherwise only
+# surface in a user's release. This chains the two, pinned to a SHA, as a user does:
+#
+# - build: stages the fixture package at the repository root (the sibling builds the package at the
+#   root) and builds it with the sibling, which uploads the artifact "dist-sibling".
+# - checksums: asserts that the artifact holds exactly one wheel and one sdist, and adds SHA256SUMS.
+#   Since v0.1.0 the sibling no longer writes SHA256SUMS ("compute them in the release job"), and this
+#   action requires it, so a job has to add it between the two; it uploads "dist-sibling-sums".
+# - sign: runs this checkout on the artifact as the sibling left it, which must be refused with the
+#   "checksums-file" id (fail closed, not signed without checksums), then on the artifact with
+#   SHA256SUMS, which must be signed (real Sigstore) and released to the fake gh of test/fake-gh.
+#   Makes no GitHub API call.
+#
+# A failure here means that one of the two actions changed what it produces or expects: read the
+# changelog of the sibling before touching the tests. Run by nightly.yaml, and manually.
+
+name: Test Contract
+on:
+  workflow_call:
+  workflow_dispatch: # to trigger manually
+
+permissions: {}
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Stage fixture package at repo root
+        shell: bash
+        run: cp -r test/fixtures/pkg/. .
+
+      - name: Build the package with the sibling action
+        uses: durandtibo/build-pypi-package-action@239defb64fe09080292442db058bddd02f498eb3 # ratchet:durandtibo/build-pypi-package-action@v0.1.0
+        with:
+          artifact-name: dist-sibling
+
+  checksums:
+    needs: [build]
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Download the artifact of the sibling action
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # ratchet:actions/download-artifact@v8.0.2
+        with:
+          name: dist-sibling
+          path: sibling
+
+      - name: Assert the artifact holds exactly one wheel and one sdist
+        shell: bash
+        run: |
+          source scripts/test-helper.sh
+          assert_wheel_and_sdist_only sibling
+
+      - name: Generate checksums
+        shell: bash
+        run: cd sibling && sha256sum -- *.tar.gz *.whl > SHA256SUMS
+
+      - name: Upload distributions with checksums
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
+        with:
+          name: dist-sibling-sums
+          path: sibling/
+          retention-days: 1
+
+  sign:
+    needs: [checksums]
+    permissions:
+      id-token: write # Sigstore OIDC keyless signing
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TAG: ci-contract-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # ratchet:astral-sh/setup-uv@v10.3.3
+
+      - name: Use the fake gh with a draft release
+        shell: bash
+        run: |
+          source scripts/test-helper.sh
+          use_fake_gh "${RUNNER_TEMP}/fake-gh-store" new "${TAG}"
+
+      - name: Run sign action on the artifact as the sibling left it
+        id: raw
+        continue-on-error: true
+        uses: ./
+        with:
+          tag-name: ${{ env.TAG }}
+          dist-artifact-name: dist-sibling
+
+      - name: Assert it was refused for lack of SHA256SUMS
+        shell: bash
+        env:
+          ACTUAL: ${{ steps.raw.outputs.failed-check }}
+        run: |
+          source scripts/test-helper.sh
+          assert_failed_check "sibling artifact without SHA256SUMS" "checksums-file" "${ACTUAL}"
+
+      - name: Run sign action on the artifact with SHA256SUMS
+        uses: ./
+        with:
+          tag-name: ${{ env.TAG }}
+          dist-artifact-name: dist-sibling-sums
+
+      - name: Assert the action used the fake gh
+        shell: bash
+        run: |
+          source scripts/test-helper.sh
+          assert_fake_gh_used "${RUNNER_TEMP}/fake-gh-store"
+
+      - name: Assert signature bundles are cryptographically valid
+        shell: bash
+        run: |
+          source scripts/test-helper.sh
+          dist="${RUNNER_TEMP}/sign-pypi-package"
+          assert_sigstore_valid "${GITHUB_REPOSITORY}" "${dist}"/*.tar.gz "${dist}"/*.whl "${dist}/SHA256SUMS"
+
+      - name: Assert the release holds exactly the expected assets
+        shell: bash
+        run: |
+          source scripts/test-helper.sh
+          assert_fake_release_matches_dist "${RUNNER_TEMP}/fake-gh-store" "${TAG}" "${RUNNER_TEMP}/sign-pypi-package"
+
+      - name: Assert a consumer can verify the release assets
+        shell: bash
+        run: |
+          source scripts/test-helper.sh
+          assert_fake_release_verifies "${RUNNER_TEMP}/fake-gh-store" "${TAG}" "${GITHUB_REPOSITORY}"

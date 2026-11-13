@@ -138,6 +138,21 @@ assert_fake_release_verifies() {
 	rm -rf "${tmp}"
 }
 
+# assert_wheel_and_sdist_only <dir>
+# The directory holds exactly one wheel and one sdist and nothing else: what the build action
+# produces and what the checksums are generated from.
+assert_wheel_and_sdist_only() {
+	local dir="$1" files wheels sdists
+	files="$(find "${dir}" -mindepth 1 | wc -l | tr -d ' ')"
+	wheels="$(find "${dir}" -mindepth 1 -maxdepth 1 -name '*.whl' | wc -l | tr -d ' ')"
+	sdists="$(find "${dir}" -mindepth 1 -maxdepth 1 -name '*.tar.gz' | wc -l | tr -d ' ')"
+	[ "${files}" = 2 ] && [ "${wheels}" = 1 ] && [ "${sdists}" = 1 ] || {
+		echo "::error::${dir} must hold exactly one wheel and one sdist, found ${wheels} wheel(s), ${sdists} sdist(s) among ${files} file(s):"
+		find "${dir}" -mindepth 1
+		exit 1
+	}
+}
+
 # create_draft_release <tag>: a draft release for the tag, as a user could create beforehand.
 # Drafts are visible only to people with write access and create no tag (the tag would be
 # created when publishing), so the tests leave nothing on the public releases or tags pages.

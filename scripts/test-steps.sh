@@ -349,6 +349,28 @@ done
 rm -rf "${sd}/store"
 check "an unknown seed kind is refused" 1 "$(fake_gh_seed "${sd}/store" bogus v1 >/dev/null 2>&1 && echo 0 || echo 1)"
 
+echo "== assert_wheel_and_sdist_only"
+wd="$(new_dir wheel-sdist)"
+wdir="${wd}/dist"
+# wheel_case <label> <expected: ok|fail> <files...>
+wheel_case() {
+	local label="$1" expected="$2" f got=ok
+	shift 2
+	rm -rf "${wdir}"
+	mkdir -p "${wdir}"
+	for f in "$@"; do
+		case "${f}" in */) mkdir -p "${wdir}/${f}" ;; *) echo x >"${wdir}/${f}" ;; esac
+	done
+	(assert_wheel_and_sdist_only "${wdir}") >/dev/null 2>&1 || got=fail
+	check "wheel and sdist only: ${label}" "${expected}" "${got}"
+}
+wheel_case "one of each" ok p-1.whl p-1.tar.gz
+wheel_case "checksums file added" fail p-1.whl p-1.tar.gz SHA256SUMS
+wheel_case "no sdist" fail p-1.whl
+wheel_case "two wheels" fail p-1.whl p-2.whl p-1.tar.gz
+wheel_case "a subdirectory" fail p-1.whl p-1.tar.gz sub/
+wheel_case "empty" fail
+
 echo "== gh flags that the action relies on exist in the installed gh"
 # The fake only proves that the action matches the fake. This catches a renamed flag in the real
 # gh, offline; the real-release job of ci-action.yaml checks the semantics. Skipped without gh.
