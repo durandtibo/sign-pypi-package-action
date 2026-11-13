@@ -231,3 +231,19 @@ Each PR is independent and leaves CI green. `CLAUDE.md` ("Tests") changes with P
   `x-ratelimit-*` headers (`gh api -i rate_limit`) at the start and end of a run to measure the real spend.
 - **Decision for the maintainer:** run the real-release job on every pull request that touches
   `action.yml` (safer, small spend), or only after merge (cheaper, a drift is found one merge late)?
+
+## 10. Status and corrections
+
+Implemented as four stacked pull requests: the fake `gh` and signer (#73), every row in the unit tier
+(#74), the smaller integration tier (#76) and the contract test (#77).
+
+Two statements above were wrong, found while implementing:
+
+- **The released `v0.0.1` does not use `gh`.** Sections 5 and 8 say the fake applies to it. It attaches with
+  `softprops/action-gh-release`, which calls the API directly, so the fake cannot stand in. The `sign` job
+  is skipped for `released: true`, and the `release` job (real draft release) runs on every OS for it. When
+  a released version uses `gh`, drop that special case.
+- **The two actions do not share the artifact layout.** Section 5 assumed `build-pypi-package-action`
+  produces the `SHA256SUMS` this action requires. Since its v0.1.0 it does not, so the README example of
+  this repository fails with `checksums-file`. The contract test of `ci-contract.yaml` encodes the chain
+  with a checksums job in between, and the refusal of the raw artifact. How to fix the README is open.
