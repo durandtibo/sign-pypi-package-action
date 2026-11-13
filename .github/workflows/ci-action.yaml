@@ -228,6 +228,7 @@ jobs:
           name: dist-${{ matrix.name }}
           path: case-dist/
           retention-days: 1
+          include-hidden-files: true # the hidden-file row stages a dotfile
 
       - name: Create throwaway tag and release
         id: setup
