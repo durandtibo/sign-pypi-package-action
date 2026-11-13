@@ -109,8 +109,8 @@ Conventions:
   byte-identical to the dist (`assert_release_matches_dist`).
 - Never create public releases or tags in tests: they are permanent noise on the repository's releases
   and tags pages. Tests only create draft releases (`create_draft_release`: visible to writers only, no
-  tag) and delete them in an `if: always()` step. Title every throwaway release
-  `... (throwaway, will be deleted)`, the marker that `make clean-throwaway-releases` matches. Behaviour that needs a real tag, such as the action
+  tag) and delete them in an `if: always()` step. The title of every throwaway
+  release must include `(throwaway, will be deleted)`, which `make clean-throwaway-releases` matches. Behaviour that needs a real tag, such as the action
   creating and publishing a release, is tested in `scripts/test-steps.sh` against a stub `gh`. Do not
   add a test that pushes a tag or publishes a release; `make clean-throwaway-releases` only removes
   the old ones.
