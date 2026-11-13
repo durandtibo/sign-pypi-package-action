@@ -401,17 +401,26 @@ check "fail ids of action.yml are the ids of the README table" "${readme_ids}" "
 output_ids="$(sed -n '/^outputs:/,/^runs:/p' "${action}" | grep -oE '\(tag, [a-z, -]*\)' | tr -d '(),' | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')"
 check "ids listed in the output description are the fail ids" "${action_ids}" "${output_ids}"
 
-# Every id has a row in the table of test/cases.json, except the ones tested elsewhere:
-# permissions (own job of ci-action.yaml) and bundle (step 2.3 above, Sigstore cannot omit it).
+# Every id has a row in the table of test/cases.json (the permissions and bundle rows are "local":
+# they run in the unit tier only, because a job cannot lack its OIDC token in the case job and real
+# Sigstore cannot omit a bundle).
 for id in ${action_ids} unexpected; do
-	case "${id}" in permissions | bundle) continue ;; esac
 	n="$(jq --arg id "${id}" '[.[] | select(.expected == $id)] | length' "${root}/test/cases.json")"
 	check "cases.json has a row expecting '${id}'" "yes" "$([ "${n}" -ge 1 ] && echo yes || echo no)"
 done
 check "case names are unique" "" "$(jq -r '[.[].name] | group_by(.)[] | select(length > 1) | .[0]' "${root}/test/cases.json")"
 check "case names are kebab-case" "" "$(jq -r '.[].name | select(test("^[a-z0-9]+(-[a-z0-9]+)*$") | not)' "${root}/test/cases.json")"
-check "case fields are known" "" "$(jq -r '.[] | .name as $n | keys[] | select(IN("name","stage","expected","released","runs","tag","artifact") | not) | "\($n): \(.)"' "${root}/test/cases.json")"
-check "case tags are known" "" "$(jq -r '.[] | select(.tag != null and (.tag | IN("new","same","missing","none","dash","space","draft") | not)) | .name' "${root}/test/cases.json")"
+check "case fields are known" "" "$(jq -r '.[] | .name as $n | keys[] | select(IN("name","stage","expected","released","runs","tag","artifact","integration","local","gh-fail","sign","oidc","ref") | not) | "\($n): \(.)"' "${root}/test/cases.json")"
+check "case tags are known" "" "$(jq -r '.[] | select(.tag != null and (.tag | IN("new","same","missing","none","dash","space","draft","published","tagged") | not)) | .name' "${root}/test/cases.json")"
+# What only the fake can do (the tags published and tagged, the injected failures, the missing OIDC
+# token, the faked signer, a tag ref) cannot be a case of the real workflow: it must be "local".
+check "rows that need the fakes are local" "" "$(jq -r '.[] | select(((.tag // "") | IN("published","tagged")) or .["gh-fail"] != null or .sign != null or .oidc != null or .ref != null) | select(.local != true) | .name' "${root}/test/cases.json")"
+check "no row is both local and integration" "" "$(jq -r '.[] | select(.local == true and .integration == true) | .name' "${root}/test/cases.json")"
+check "no local row is flagged released" "" "$(jq -r '.[] | select(.local == true and .released == true) | .name' "${root}/test/cases.json")"
+check "case artifacts are integration rows" "" "$(jq -r '.[] | select(.artifact != null and .integration != true) | .name' "${root}/test/cases.json")"
+check "fake gh failures are known verbs" "" "$(jq -r '.[] | select(.["gh-fail"] != null and (.["gh-fail"] | IN("view","create","upload","edit","delete") | not)) | .name' "${root}/test/cases.json")"
+check "fake signer modes are known" "" "$(jq -r '.[] | select(.sign != null and (.sign | test("^(all|none|skip:.+|empty:.+)$") | not)) | .name' "${root}/test/cases.json")"
+check "case refs are tag" "" "$(jq -r '.[] | select(.ref != null and .ref != "tag") | .name' "${root}/test/cases.json")"
 check "case expected ids are known" "" "$(jq -r --arg ids "${action_ids}unexpected " '.[] | select(.expected != "") | .expected as $e | select(($ids | split(" ")) | index($e) | not) | .name' "${root}/test/cases.json")"
 check "case runs are 1 or 2" "" "$(jq -r '.[] | select(.runs != null and (.runs | IN(1,2) | not)) | .name' "${root}/test/cases.json")"
 check "every case has a stage" "" "$(jq -r '.[] | select((.stage // "") == "") | .name' "${root}/test/cases.json")"

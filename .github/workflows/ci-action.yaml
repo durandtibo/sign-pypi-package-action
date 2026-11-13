@@ -7,7 +7,8 @@
 #   runs the action, verifies the Sigstore bundles, that the release holds exactly the
 #   expected assets (byte-identical to the dist) and that a consumer can verify
 #   the downloaded assets, then deletes the release.
-# - case: one job per row of test/cases.json. Each stages a modified copy of
+# - case: one job per row of test/cases.json (except the "local" rows, which need fakes and run in
+#   `make test-local`). Each stages a modified copy of
 #   dist-base, runs the action once or twice and asserts the exact failed-check
 #   id. A rejected run must leave nothing on the release (no asset, no release
 #   it would have created); an accepted one must leave exactly the expected
@@ -66,8 +67,9 @@ jobs:
         env:
           RELEASED: ${{ inputs.released }}
         run: |
+          # Rows flagged "local" need the fakes of scripts/fake-runner.sh and only run in `make test-local`.
           # With released: true only the rows flagged "released" run.
-          echo "cases=$(jq -c --argjson r "${RELEASED}" 'map(select($r == false or .released == true))' test/cases.json)" >> "$GITHUB_OUTPUT"
+          echo "cases=$(jq -c --argjson r "${RELEASED}" 'map(select(.local != true and ($r == false or .released == true)))' test/cases.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload distributions for the cases
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2

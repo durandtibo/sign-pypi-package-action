@@ -103,8 +103,8 @@ Conventions:
 - Every check calls `fail <id> ...` and has a row in `test/cases.json` with the expected
   `failed-check` id. A new case is one row: `name`, a `stage` snippet that mutates a copy of the good
   `dist/`, `expected` (`""` = accepted), and optionally `released`, `runs` (`2` runs the action twice)
-  `artifact` (download another artifact than the staged one) and `tag` (`new` default, `same`,
-  `missing`, `none`, `dash`, `space`, `draft`; see the `case` job). A rejected single run
+  `artifact` (download another artifact than the staged one, with `"integration": true`) and `tag` (`new` default, `same`,
+  `missing`, `none`, `dash`, `space`, `draft`; see the `case` job), and the `local` fields below. A rejected single run
   must also leave no asset on the release, and an accepted run must leave exactly the expected assets,
   byte-identical to the dist (`assert_release_matches_dist`).
 - Never create public releases or tags in tests: they are permanent noise on the repository's releases
@@ -121,15 +121,26 @@ Conventions:
   Step 1.1 (artifact download) is covered by the `missing-artifact` row.
 - The `sign` job also checks what a consumer does: the assets downloaded from the release verify
   with their bundles (`assert_release_verifies`).
-- `make test-local` needs no runner and has two parts: `scripts/test-local.sh` runs the table rows
-  that need no release, and `scripts/test-steps.sh` runs the extracted steps on a fake runner:
-  0.1, 0.2 (including output injection), 1.2 outputs, 1.4 with the `shasum` fallback, 2.1, 2.3
-  (bundle check, which has no table row because Sigstore cannot succeed without writing the
-  bundle), 3.1 against the fake `gh` of `test/fake-gh/` (draft creation, publish, deletion of a draft created by the run,
-  nothing deleted when the release pre-existed, never `--cleanup-tag` or `--clobber`, no tag created), 4.1 and 4.2. It
-  also checks that the ids of `action.yml`, the README table, the output description and
-  `test/cases.json` agree, that every `run:` sets `shell: bash` and has no `${{ }}`, and that every
-  `uses:` is pinned. A new step or id needs its test there.
+- `make test-local` is the unit tier. It needs no runner and makes no API call, and has two parts.
+  `scripts/test-local.sh` runs every row of the table through the whole action with
+  `scripts/fake-runner.sh`: the real steps, extracted from `action.yml`, run in order against a fake
+  artifact download, a fake signer, the fake `gh` and a set or unset OIDC token. It asserts the id, the
+  assets of the fake release (byte-identical to the dist), that a rejected run attached nothing and left
+  no release it created, that drafts stay drafts, that no tag is created or removed and that a check
+  before the release made no `gh` call. Rows flagged `"integration": true` need the real artifact
+  service and are left to `ci-action.yaml`. `scripts/test-steps.sh` runs the extracted steps in
+  isolation: 0.1, 0.2 (including output injection), 1.2 outputs, 1.4 with the `shasum` fallback, 2.1,
+  2.3, 3.1 against the fake `gh` of `test/fake-gh/` (draft creation, publish, deletion of a draft created
+  by the run, nothing deleted when the release pre-existed, never `--cleanup-tag` or `--clobber`, no tag
+  created), 4.1 and 4.2, the fake itself and the `gh` flags it models. It also checks that the ids of
+  `action.yml`, the README table, the output description and `test/cases.json` agree, that every `run:`
+  sets `shell: bash` and has no `${{ }}`, and that every `uses:` is pinned. A new step or id needs its
+  test there.
+- Rows that need the fakes are flagged `"local": true` and are not run by `ci-action.yaml`: the tag kinds
+  `published` (a published release exists) and `tagged` (the tag is pushed and there is no release, so the
+  action creates and publishes one: a public release that the end-to-end tests must never make), and the
+  fields `gh-fail` (a verb of the fake `gh` that fails), `sign` (a mode of `fake_sigstore_sign`), `oidc`
+  (`false` = no `id-token`) and `ref` (`tag` = a tag push without the `tag-name` input).
 - Step 2.1 (`permissions`) cannot share the `case` job, because permissions are per job: it has its
   own `permissions` job without `id-token`.
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
