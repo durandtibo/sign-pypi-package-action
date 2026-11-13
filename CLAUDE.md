@@ -11,8 +11,8 @@ everything to the release with `gh` (assets are never overwritten). The logic li
 (bash steps that must work on Linux and macOS runners (Windows is not supported)), in steps named `N.x` by topic:
 `0.1` failure helper, `0.2` tag, `1.1` download, `1.2` SHA256SUMS, `1.3` file set, `1.4` checksums,
 `2.1` signing permission, `2.2` sign, `2.3` bundles, `3.1` release, `4.1` summary, `4.2` report. One purpose and one failure id per step. End-to-end testing is done by
-workflows against throwaway draft releases (see "Tests"), using the fixture package in `test/fixtures/pkg/` and the shared
-assertions in `scripts/test-helper.sh`. Neither is part of the action itself.
+workflows against throwaway draft releases (see "Tests"), using the fixture package in `test/fixtures/pkg/`, the shared
+assertions and fakes in `scripts/test-helper.sh`, and the fake `gh` in `test/fake-gh/`. None is part of the action itself.
 
 ## Environment
 
@@ -125,14 +125,18 @@ Conventions:
   that need no release, and `scripts/test-steps.sh` runs the extracted steps on a fake runner:
   0.1, 0.2 (including output injection), 1.2 outputs, 1.4 with the `shasum` fallback, 2.1, 2.3
   (bundle check, which has no table row because Sigstore cannot succeed without writing the
-  bundle), 3.1 against a stub `gh` (draft creation, publish, deletion of a draft created by the run,
-  nothing deleted when the release pre-existed, never `--cleanup-tag` or `--clobber`), 4.1 and 4.2. It
+  bundle), 3.1 against the fake `gh` of `test/fake-gh/` (draft creation, publish, deletion of a draft created by the run,
+  nothing deleted when the release pre-existed, never `--cleanup-tag` or `--clobber`, no tag created), 4.1 and 4.2. It
   also checks that the ids of `action.yml`, the README table, the output description and
   `test/cases.json` agree, that every `run:` sets `shell: bash` and has no `${{ }}`, and that every
   `uses:` is pinned. A new step or id needs its test there.
 - Step 2.1 (`permissions`) cannot share the `case` job, because permissions are per job: it has its
   own `permissions` job without `id-token`.
 - Reuse the assertions in `scripts/test-helper.sh` rather than inlining new verification logic.
+- `test/fake-gh/fake-gh.sh` (the `gh` symlink next to it) is a stateful fake of the `gh release` calls of
+  `action.yml` over a directory (`FAKE_GH_ROOT`); any other call exits 99. A new `gh` call in the action
+  needs support in the fake and a test of it in `scripts/test-steps.sh`, and each rule of the fake models a
+  documented behaviour of the real `gh`. The same file also checks that the `gh` flags the action uses exist.
 - Every bug fix needs a regression test that fails without the fix.
 - If a check fails for a real reason, report it rather than weakening the test.
 
