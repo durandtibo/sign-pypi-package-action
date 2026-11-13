@@ -196,12 +196,94 @@
     "name": "missing-artifact",
     "stage": ":",
     "expected": "unexpected",
-    "artifact": "dist-does-not-exist"
+    "artifact": "dist-does-not-exist",
+    "integration": true
   },
   {
     "name": "existing-draft-release",
     "stage": ":",
     "expected": "",
     "tag": "draft"
+  },
+  {
+    "name": "tag-from-ref",
+    "stage": ":",
+    "expected": "",
+    "ref": "tag",
+    "local": true
+  },
+  {
+    "name": "creates-and-publishes-release",
+    "stage": ":",
+    "expected": "",
+    "tag": "tagged",
+    "local": true
+  },
+  {
+    "name": "published-release-only-added",
+    "stage": ":",
+    "expected": "",
+    "tag": "published",
+    "local": true
+  },
+  {
+    "name": "create-fails",
+    "stage": ":",
+    "expected": "release",
+    "tag": "tagged",
+    "gh-fail": "create",
+    "local": true
+  },
+  {
+    "name": "upload-fails-release-created-by-run",
+    "stage": ":",
+    "expected": "release",
+    "tag": "tagged",
+    "gh-fail": "upload",
+    "local": true
+  },
+  {
+    "name": "publish-fails-release-created-by-run",
+    "stage": ":",
+    "expected": "release",
+    "tag": "tagged",
+    "gh-fail": "edit",
+    "local": true
+  },
+  {
+    "name": "upload-fails-existing-draft",
+    "stage": ":",
+    "expected": "release",
+    "tag": "new",
+    "gh-fail": "upload",
+    "local": true
+  },
+  {
+    "name": "no-id-token",
+    "stage": ":",
+    "expected": "permissions",
+    "oidc": false,
+    "local": true
+  },
+  {
+    "name": "no-bundles",
+    "stage": ":",
+    "expected": "bundle",
+    "sign": "none",
+    "local": true
+  },
+  {
+    "name": "missing-sums-bundle",
+    "stage": ":",
+    "expected": "bundle",
+    "sign": "skip:SHA256SUMS",
+    "local": true
+  },
+  {
+    "name": "empty-sums-bundle",
+    "stage": ":",
+    "expected": "bundle",
+    "sign": "empty:SHA256SUMS",
+    "local": true
   }
 ]

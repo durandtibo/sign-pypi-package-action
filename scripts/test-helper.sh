@@ -68,6 +68,43 @@ fake_sigstore_sign() {
 	done
 }
 
+# fake_release_state <store> <tag>: "draft", "published" or "absent" in the store of test/fake-gh.
+fake_release_state() {
+	if [ -f "$1/$2/state" ]; then cat "$1/$2/state"; else echo absent; fi
+}
+
+# fake_release_assets <store> <tag>: the sorted asset names of the release, one per line.
+fake_release_assets() {
+	if [ -d "$1/$2/assets" ]; then (cd "$1/$2/assets" && find . -type f | sed 's|^\./||' | LC_ALL=C sort); fi
+}
+
+# assert_fake_release_matches_dist <store> <tag> <dist-dir>
+# The fake release holds exactly the assets expected for the dist (see release_asset_names, with
+# the bundle of SHA256SUMS), every distribution and SHA256SUMS is byte-identical to its source,
+# and every bundle is non-empty. Prints the problem and returns 1 instead of exiting.
+assert_fake_release_matches_dist() {
+	local store="$1" tag="$2" dist="$3" expected actual f
+	expected="$(release_asset_names "${dist}" true | LC_ALL=C sort)"
+	actual="$(fake_release_assets "${store}" "${tag}")"
+	[ "${expected}" = "${actual}" ] || {
+		echo "release ${tag} assets differ from the dist ('<' missing, '>' unexpected):"
+		diff <(echo "${expected}") <(echo "${actual}") || true
+		return 1
+	}
+	for f in SHA256SUMS $(sed -E 's/^.{64} .//' "${dist}/SHA256SUMS"); do
+		cmp -s "${dist}/${f}" "${store}/${tag}/assets/${f}" || {
+			echo "release asset ${f} of ${tag} is not identical to the file that was checksummed"
+			return 1
+		}
+	done
+	for f in $(echo "${actual}" | grep '\.sigstore\.json$'); do
+		[ -s "${store}/${tag}/assets/${f}" ] || {
+			echo "bundle ${f} of ${tag} is empty"
+			return 1
+		}
+	done
+}
+
 # create_draft_release <tag>: a draft release for the tag, as a user could create beforehand.
 # Drafts are visible only to people with write access and create no tag (the tag would be
 # created when publishing), so the tests leave nothing on the public releases or tags pages.

@@ -1,8 +1,9 @@
 # Shell tests workflow.
 # Runs, on multiple operating systems, the tests of the bash steps of action.yml that need no
-# GitHub runner features: the escaping of the failure helper (step 0.1) and the table cases of
-# test/cases.json that need no release (steps 0.2 and 1.2 to 1.4). The rest of the cases is
-# run by ci-action.yaml.
+# GitHub runner features (the unit tier): the escaping of the failure helper (step 0.1), every row
+# of test/cases.json run through the whole action with a fake artifact download, signer and gh
+# (scripts/fake-runner.sh), and the tests of each step. Real signing, the real artifact service and
+# real releases are tested by ci-action.yaml.
 
 name: Shell Tests
 on:
@@ -50,8 +51,8 @@ jobs:
           source scripts/test-helper.sh
           assert_fail_helper_escapes action.yml
 
-      - name: Run the local table cases
-        # Steps 0.2 and 1.2 to 1.4 on every row that needs no release.
+      - name: Run the unit tests
+        # Every row of test/cases.json against the fakes, and each step in isolation.
         shell: bash
         run: |
           echo "🧪 Running tests on ${{ matrix.os }}..."
