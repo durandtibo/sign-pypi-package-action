@@ -309,16 +309,6 @@ assert_fail_helper_escapes() {
 	rm -rf "${dir}"
 }
 
-# assert_failure <label> <actual-outcome>
-assert_failure() {
-	local label="$1" actual_outcome="$2"
-
-	test "${actual_outcome}" = "failure" || {
-		echo "::error::expected ${label} to fail, got outcome=${actual_outcome}"
-		exit 1
-	}
-}
-
 # assert_failed_check <label> <expected-id> <actual-id>
 # The action's failed-check output is empty on success; tests assert the id,
 # never the message text.
