@@ -18,14 +18,19 @@ format: format-yaml format-makefile format-shell format-markdown ## Format all f
 lint: lint-yaml lint-makefile lint-shell lint-markdown lint-actions ## Lint all files
 
 .PHONY: clean-throwaway-releases
-clean-throwaway-releases: ## Delete the throwaway releases (drafts included, and any tag they left) titled "(throwaway, will be deleted)"
-	gh release list --limit 1000 --json name,tagName \
+clean-throwaway-releases: ## Delete the throwaway releases (drafts included) titled "(throwaway, will be deleted)" and the CI test tags (ci-<name>-<run id>-<attempt>)
+	GH_PAGER=cat gh release list --limit 1000 --json name,tagName \
 		--jq '.[] | select(.name | contains("(throwaway, will be deleted)")) | .tagName' \
 		| while read -r tag; do \
 			echo "Deleting release $$tag"; \
-			gh release delete "$$tag" --yes; \
-			gh api -X DELETE "repos/{owner}/{repo}/git/refs/tags/$$tag" >/dev/null 2>&1 || true; \
+			GH_PAGER=cat gh release delete "$$tag" --yes; \
 		done
+	GH_PAGER=cat gh api --paginate "repos/{owner}/{repo}/git/matching-refs/tags/ci-" --jq '.[].ref | ltrimstr("refs/tags/")' \
+		| grep -E '^ci-.+-[0-9]+-[0-9]+(-2)?$$' \
+		| while read -r tag; do \
+			echo "Deleting tag $$tag"; \
+			GH_PAGER=cat gh api -X DELETE "repos/{owner}/{repo}/git/refs/tags/$$tag"; \
+		done || true
 
 .PHONY: test-local
 test-local: ## Run the tests that need no GitHub runner (table cases, step tests, consistency checks)
