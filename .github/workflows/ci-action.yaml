@@ -240,8 +240,9 @@ jobs:
           NAME: dist-${{ matrix.name }}
         run: |
           for _ in $(seq 1 30); do
-            n=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
-              --jq "[.artifacts[] | select(.name == \"${NAME}\")] | length" || echo 0)
+            # Filter by name: the unfiltered listing is paginated (30 per page) and the run has more artifacts.
+            n=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              -f name="${NAME}" --jq '.artifacts | length' 2>/dev/null || echo 0)
             if [ "${n}" != "0" ]; then
               sleep 5 # the download backend can lag behind the listing
               exit 0
