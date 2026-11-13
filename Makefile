@@ -17,6 +17,15 @@ format: format-yaml format-makefile format-shell format-markdown ## Format all f
 .PHONY: lint
 lint: lint-yaml lint-makefile lint-shell lint-markdown lint-actions ## Lint all files
 
+.PHONY: clean-throwaway-releases
+clean-throwaway-releases: ## Delete the releases (and their tags) titled "(throwaway, will be deleted)"
+	gh release list --limit 1000 --json name,tagName \
+		--jq '.[] | select(.name | contains("(throwaway, will be deleted)")) | .tagName' \
+		| while read -r tag; do \
+			echo "Deleting release $$tag"; \
+			gh release delete "$$tag" --yes --cleanup-tag; \
+		done
+
 .PHONY: test-local
 test-local: ## Run the tests that need no GitHub runner (table cases, step tests, consistency checks)
 	bash scripts/test-local.sh
