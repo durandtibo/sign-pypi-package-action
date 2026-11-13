@@ -197,7 +197,8 @@
     "stage": ":",
     "expected": "unexpected",
     "artifact": "dist-does-not-exist",
-    "integration": true
+    "integration": true,
+    "released": true
   },
   {
     "name": "existing-draft-release",

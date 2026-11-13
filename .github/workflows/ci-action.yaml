@@ -9,12 +9,11 @@
 # - sign: across Linux/macOS, runs the action with the fake gh of test/fake-gh (a release in a local
 #   store, no GitHub API call, no contents: write), with the real artifact download and the real
 #   Sigstore signing. Verifies the bundles, that the release holds exactly the expected assets
-#   (byte-identical to the dist) and that a consumer can verify the assets. Not run for the released
-#   tag: v0.0.1 attaches with softprops/action-gh-release, which calls the API and not `gh`.
+#   (byte-identical to the dist) and that a consumer can verify the assets.
 # - release: the contract test of the fake gh. Creates a throwaway draft release (never public, no
 #   tag), runs the action with the real gh, checks the same things as sign, then deletes the release.
-#   About 10 API calls per job. Linux only for this checkout; every OS for the released tag, which
-#   needs a real release instead of sign. Skipped when real-release is false (a pull request that
+#   About 10 API calls per job, on Linux only.
+#   Skipped when real-release is false (a pull request that
 #   changes nothing that could make the fake drift from gh).
 # - case: the rows of test/cases.json flagged "integration" (and not "local"): they need the real
 #   artifact service, name an existing-or-not artifact to download and must be rejected before any
@@ -22,12 +21,9 @@
 # - permissions: runs the action on the good dist in a job without id-token: write and asserts the
 #   "permissions" id (permissions are per job, so this check cannot be a row of the case job).
 #
-# The released version (v0.0.1) has neither the failed-check output nor the
-# dist-artifact-name input, so no row is flagged "released": true yet. At release
-# time: flag the rows the new version supports, bump the SHA below (and
-# the ratchet comment), drop the extra "dist" upload of the build job, and if the new version
-# attaches with gh, drop the `!inputs.released` condition of the sign job and the released branch of
-# the release job.
+# The released version (v0.1.0) supports every row flagged "released": true in test/cases.json. At
+# release time: flag the rows the new version supports, bump the SHA below (and the ratchet comment),
+# and delete the helpers that only existed for the old tag.
 
 name: Test Action
 on:
@@ -90,19 +86,9 @@ jobs:
           path: dist/
           retention-days: 1
 
-      - name: Upload distributions as "dist" for the released action
-        # The released v0.0.1 only downloads an artifact named "dist".
-        if: inputs.released
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # ratchet:actions/upload-artifact@v7.0.2
-        with:
-          name: dist
-          path: dist/
-          retention-days: 1
-
   sign:
     # The release is a directory of the fake gh: no API call. The artifact download and the Sigstore
     # signing are real.
-    if: ${{ !inputs.released }}
     needs: [build]
     strategy:
       max-parallel: 8
@@ -131,7 +117,15 @@ jobs:
           use_fake_gh "${RUNNER_TEMP}/fake-gh-store" new "${TAG}"
 
       - name: Run sign action (this checkout)
+        if: ${{ !inputs.released }}
         uses: ./
+        with:
+          tag-name: ${{ env.TAG }}
+          dist-artifact-name: dist-base
+
+      - name: Run sign action (released)
+        if: ${{ inputs.released }}
+        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:
           tag-name: ${{ env.TAG }}
           dist-artifact-name: dist-base
@@ -175,8 +169,7 @@ jobs:
       max-parallel: 8
       fail-fast: false
       matrix:
-        # The released v0.0.1 does not use gh, so sign cannot test it: it gets the whole matrix here.
-        os: ${{ inputs.released && fromJson(inputs.test-matrix).os_matrix || fromJson('["ubuntu-latest"]') }}
+        os: ["ubuntu-latest"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     permissions:
@@ -208,42 +201,33 @@ jobs:
 
       - name: Run sign action (released)
         if: ${{ inputs.released }}
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:
           tag-name: ${{ env.TAG }}
+          dist-artifact-name: dist-base
 
       - name: Assert signature bundles are cryptographically valid
-        # The current action downloads to RUNNER_TEMP/sign-pypi-package, the released one to the workspace.
         shell: bash
-        env:
-          RELEASED: ${{ inputs.released }}
-          DIST_DIR: ${{ inputs.released && 'dist' || format('{0}/sign-pypi-package', runner.temp) }}
         run: |
           source scripts/test-helper.sh
-          assert_sigstore_valid "${GITHUB_REPOSITORY}" "${DIST_DIR}"/*.tar.gz "${DIST_DIR}"/*.whl
-          # The checksums file is signed too, except by the released v0.0.1.
-          if [ "${RELEASED}" != "true" ]; then
-            assert_sigstore_valid "${GITHUB_REPOSITORY}" "${DIST_DIR}/SHA256SUMS"
-          fi
+          dist="${RUNNER_TEMP}/sign-pypi-package"
+          assert_sigstore_valid "${GITHUB_REPOSITORY}" "${dist}"/*.tar.gz "${dist}"/*.whl "${dist}/SHA256SUMS"
 
       - name: Assert the release holds exactly the expected assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SUMS_BUNDLE: ${{ !inputs.released }}
-          DIST_DIR: ${{ inputs.released && 'dist' || format('{0}/sign-pypi-package', runner.temp) }}
         run: |
           source scripts/test-helper.sh
-          assert_release_matches_dist "${TAG}" "${DIST_DIR}" "${SUMS_BUNDLE}"
+          assert_release_matches_dist "${TAG}" "${RUNNER_TEMP}/sign-pypi-package" true
 
       - name: Assert a consumer can verify the downloaded release assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SUMS_BUNDLE: ${{ !inputs.released }}
         run: |
           source scripts/test-helper.sh
-          assert_release_verifies "${TAG}" "${GITHUB_REPOSITORY}" "${SUMS_BUNDLE}"
+          assert_release_verifies "${TAG}" "${GITHUB_REPOSITORY}" true
 
       - name: Delete throwaway draft release
         if: always()
@@ -288,7 +272,7 @@ jobs:
         id: released
         if: ${{ inputs.released }}
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@5f8c22801ccd4af3d171e3e395fd44e40018f1f5 # ratchet:durandtibo/sign-pypi-package-action@v0.0.1
+        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:
           tag-name: ${{ env.TAG }}
           dist-artifact-name: ${{ matrix.artifact }}
@@ -298,23 +282,15 @@ jobs:
         env:
           LABEL: ${{ matrix.name }}
           EXPECTED: ${{ matrix.expected }}
-          RELEASED: ${{ inputs.released }}
-          ACTUAL_ID: ${{ steps.local.outputs.failed-check }}
-          ACTUAL_OUTCOME: ${{ steps.released.outcome }}
+          ACTUAL_ID: ${{ steps.local.outputs.failed-check || steps.released.outputs.failed-check }}
         run: |
           source scripts/test-helper.sh
-          # The released version has no failed-check output: only its outcome is known.
-          if [ "${RELEASED}" = "true" ]; then
-            assert_failure "${LABEL}" "${ACTUAL_OUTCOME}"
-          else
-            assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL_ID}"
-          fi
+          assert_failed_check "${LABEL}" "${EXPECTED}" "${ACTUAL_ID}"
 
   permissions:
     # Without id-token: write the action must stop before signing, with the
-    # "permissions" id. The released v0.0.1 has no such check.
+    # "permissions" id.
     needs: [build]
-    if: ${{ !inputs.released }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -323,10 +299,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
 
-      - name: Run sign action without id-token permission
-        id: sign
+      - name: Run sign action without id-token permission (this checkout)
+        id: local
+        if: ${{ !inputs.released }}
         continue-on-error: true
         uses: ./
+        with:
+          tag-name: ci-permissions-${{ github.run_id }}-${{ github.run_attempt }}
+          dist-artifact-name: dist-base
+
+      - name: Run sign action without id-token permission (released)
+        id: released
+        if: ${{ inputs.released }}
+        continue-on-error: true
+        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:
           tag-name: ci-permissions-${{ github.run_id }}-${{ github.run_attempt }}
           dist-artifact-name: dist-base
@@ -334,7 +320,7 @@ jobs:
       - name: Assert the permissions check failed
         shell: bash
         env:
-          ACTUAL: ${{ steps.sign.outputs.failed-check }}
+          ACTUAL: ${{ steps.local.outputs.failed-check || steps.released.outputs.failed-check }}
         run: |
           source scripts/test-helper.sh
           assert_failed_check "no-oidc" "permissions" "${ACTUAL}"
