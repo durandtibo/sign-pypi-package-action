@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared assertions for ci-action.yaml, which tests both the current checkout
-# and the last released tag, so verification logic is written once.
+# and the last released tag, so verification logic is written once, and the fakes of the
+# unit tests (scripts/test-local.sh, scripts/test-steps.sh): a fake `gh` store and a fake signer.
 set -euo pipefail
 
 # extract_step <action.yml> <step number>: the run: block of the step (for example "3.1"), de-indented.
@@ -11,6 +12,60 @@ extract_step() {
 		s && /^      run: \|/ { r = 1; next }
 		s && r { sub(/^        /, ""); print }
 	' "$1"
+}
+
+# fake_gh_seed <store> <kind> <tag>: prepare the store of test/fake-gh/gh for a "tag" kind of
+# test/cases.json, so that the action finds what a real repository would hold before the run:
+#   new, same, draft  the tag was pushed and a draft release exists
+#   published         the tag was pushed and a published release exists
+#   tagged            the tag was pushed, there is no release
+#   missing           neither the tag nor a release exists (also none, dash, space: no tag is used)
+fake_gh_seed() {
+	local store="$1" kind="$2" tag="$3"
+	mkdir -p "${store}"
+	touch "${store}/tags"
+	case "${kind}" in
+	new | same | draft | published | tagged) echo "${tag}" >>"${store}/tags" ;;
+	missing | none | dash | space) return 0 ;;
+	*)
+		echo "::error::unknown tag kind '${kind}'"
+		return 1
+		;;
+	esac
+	case "${kind}" in
+	new | same | draft)
+		mkdir -p "${store}/${tag}/assets"
+		echo draft >"${store}/${tag}/state"
+		;;
+	published)
+		mkdir -p "${store}/${tag}/assets"
+		echo published >"${store}/${tag}/state"
+		;;
+	esac
+}
+
+# fake_sigstore_sign <mode> <file>...: stands in for step 2.2 (Sigstore), which cannot run without
+# an OIDC token. It writes <file>.sigstore.json for each file, so that what is tested is the logic
+# around signing (step 2.3), never Sigstore itself. Modes:
+#   all             a bundle for every file
+#   skip:<name>     a bundle for every file except <name>
+#   empty:<name>    an empty bundle for <name>
+#   none            no bundle at all
+fake_sigstore_sign() {
+	local mode="$1" f
+	shift
+	for f in "$@"; do
+		case "${mode}" in
+		all) echo '{}' >"${f}.sigstore.json" ;;
+		skip:*) [ "$(basename "${f}")" = "${mode#skip:}" ] || echo '{}' >"${f}.sigstore.json" ;;
+		empty:*) if [ "$(basename "${f}")" = "${mode#empty:}" ]; then : >"${f}.sigstore.json"; else echo '{}' >"${f}.sigstore.json"; fi ;;
+		none) ;;
+		*)
+			echo "::error::unknown fake signer mode '${mode}'"
+			return 1
+			;;
+		esac
+	done
 }
 
 # create_draft_release <tag>: a draft release for the tag, as a user could create beforehand.

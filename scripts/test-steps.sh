@@ -4,7 +4,8 @@
 #   - 0.1 cleanup of a previous run, 0.2 tag resolution (and output injection)
 #   - 1.2 outputs, 1.4 with the `shasum -a 256` fallback
 #   - 2.1 permission check, 2.3 bundle check
-#   - 3.1 release logic against a stub `gh` (draft handling, cleanup, no overwrite, no --cleanup-tag)
+#   - 3.1 release logic against the fake `gh` of test/fake-gh (draft handling, cleanup, no overwrite,
+#     no --cleanup-tag), and the fake itself and the `gh` flags it models
 #   - 4.1 success summary, 4.2 failed-check output
 #   - consistency of action.yml, README.md, test/cases.json and the workflows
 # The table of test/cases.json is run by test-local.sh; signing and real releases by ci-action.yaml.
@@ -194,62 +195,180 @@ bundle_case sums-missing bundle SHA256SUMS
 bundle_case wheel-empty bundle EMPTY:pkg-1.whl
 bundle_case sums-empty bundle EMPTY:SHA256SUMS
 
-echo "== step 3.1: release logic with a stub gh"
-mkdir -p "${work}/stubbin"
-cat >"${work}/stubbin/gh" <<'EOF'
-#!/usr/bin/env bash
-# Records every call; the behaviour is chosen by STUB_* variables.
-echo "$*" >>"${GH_LOG}"
-case "$1 $2" in
-"release view") [ "${STUB_EXISTS:-0}" = 1 ] ;;
-"release create") [ "${STUB_CREATE_FAIL:-0}" != 1 ] ;;
-"release upload") [ "${STUB_UPLOAD_FAIL:-0}" != 1 ] ;;
-"release edit") [ "${STUB_EDIT_FAIL:-0}" != 1 ] ;;
-"release delete") true ;;
-*)
-	echo "unexpected gh call: $*" >&2
-	exit 99
-	;;
-esac
-EOF
-chmod +x "${work}/stubbin/gh"
-# release_case <label> <expected id> <expected calls: space-separated verbs> [STUB_*=1...]
+echo "== step 3.1: release logic with the fake gh (test/fake-gh)"
+fakebin="${root}/test/fake-gh"
+# release_case <label> <expected id> <expected calls: space-separated verbs> <seed kind> [FAKE_GH_FAIL=verb]
 # The verbs are the gh subcommands (view, create, upload, edit, delete) in the order of the calls.
+# The seed kind is the state of the repository before the run (see fake_gh_seed). Afterwards
+# $store holds the releases, for the checks of the caller.
 release_case() {
-	local label="$1" expected="$2" calls="$3" d dist got
-	shift 3
+	local label="$1" expected="$2" calls="$3" kind="$4" d dist got log
+	shift 4
 	d="$(new_dir "release-${label}")"
 	dist="${d}/rt/sign-pypi-package"
+	store="${d}/store"
 	make_dist "${dist}" pkg-1.whl pkg-1.tar.gz
-	: >"${d}/gh.log"
-	run_step "${d}" 3.1 PATH="${work}/stubbin:${PATH}" GH_LOG="${d}/gh.log" GH_TOKEN=x TAG=v1 \
+	(cd "${dist}" && fake_sigstore_sign all SHA256SUMS pkg-1.whl pkg-1.tar.gz)
+	fake_gh_seed "${store}" "${kind}" v1
+	cp "${store}/tags" "${d}/tags.before"
+	run_step "${d}" 3.1 PATH="${fakebin}:${PATH}" FAKE_GH_ROOT="${store}" GH_TOKEN=x TAG=v1 \
 		FILES="pkg-1.tar.gz pkg-1.whl " "$@" || true
+	log="${store}/calls.log"
 	check "release ${label}: failed-check" "${expected}" "$(failed_id "${d}")"
-	got="$(awk '{print $2}' "${d}/gh.log" | tr '\n' ' ')"
+	got="$(awk '{print $2}' "${log}" | tr '\n' ' ')"
 	check "release ${label}: gh calls" "${calls}" "${got% }"
-	check_lacks "release ${label}: never --cleanup-tag" "${d}/gh.log" "--cleanup-tag"
-	check_lacks "release ${label}: never --clobber" "${d}/gh.log" "--clobber"
-	if grep -q '^release upload' "${d}/gh.log"; then
-		check_has "release ${label}: uploads every file and bundle" "${d}/gh.log" \
+	check_lacks "release ${label}: never --cleanup-tag" "${log}" "--cleanup-tag"
+	check_lacks "release ${label}: never --clobber" "${log}" "--clobber"
+	check "release ${label}: the tag list is unchanged" "$(cat "${d}/tags.before")" "$(cat "${store}/tags")"
+	if grep -q '^release upload' "${log}"; then
+		check_has "release ${label}: uploads every file and bundle" "${log}" \
 			"release upload v1 --repo o/r SHA256SUMS SHA256SUMS.sigstore.json pkg-1.tar.gz pkg-1.whl pkg-1.tar.gz.sigstore.json pkg-1.whl.sigstore.json"
 	fi
-	if grep -q '^release create' "${d}/gh.log"; then
-		check_has "release ${label}: create is a draft" "${d}/gh.log" "--draft"
-		check_has "release ${label}: create never makes the tag" "${d}/gh.log" "--verify-tag"
+	if grep -q '^release create' "${log}"; then
+		check_has "release ${label}: create is a draft" "${log}" "--draft"
+		check_has "release ${label}: create never makes the tag" "${log}" "--verify-tag"
 	fi
-	if grep -q '^release delete' "${d}/gh.log"; then
-		check_has "release ${label}: deletes only the release" "${d}/gh.log" "release delete v1 --repo o/r --yes"
+	if grep -q '^release delete' "${log}"; then
+		check_has "release ${label}: deletes only the release" "${log}" "release delete v1 --repo o/r --yes"
 	fi
-	if grep -q '^release edit' "${d}/gh.log"; then
-		check_has "release ${label}: publishes" "${d}/gh.log" "release edit v1 --repo o/r --draft=false"
+	if grep -q '^release edit' "${log}"; then
+		check_has "release ${label}: publishes" "${log}" "release edit v1 --repo o/r --draft=false"
 	fi
 }
-release_case creates-publishes "" "view create upload edit"
-release_case existing-only-added "" "view upload" STUB_EXISTS=1
-release_case create-fails release "view create" STUB_CREATE_FAIL=1
-release_case upload-fails-created-deleted release "view create upload delete" STUB_UPLOAD_FAIL=1
-release_case publish-fails-created-deleted release "view create upload edit delete" STUB_EDIT_FAIL=1
-release_case upload-fails-existing-kept release "view upload" STUB_EXISTS=1 STUB_UPLOAD_FAIL=1
+# state <store>: the release state of v1 ("absent" when there is no release).
+state() { if [ -f "$1/v1/state" ]; then cat "$1/v1/state"; else echo absent; fi; }
+# assets <store>: the sorted asset names of v1, space-separated.
+assets() { if [ -d "$1/v1/assets" ]; then (cd "$1/v1/assets" && find . -type f | sed 's|^\./||' | LC_ALL=C sort | tr '\n' ' '); fi; }
+all_assets="SHA256SUMS SHA256SUMS.sigstore.json pkg-1.tar.gz pkg-1.tar.gz.sigstore.json pkg-1.whl pkg-1.whl.sigstore.json "
+
+release_case creates-publishes "" "view create upload edit" tagged
+check "release creates-publishes: published" published "$(state "${store}")"
+check "release creates-publishes: every asset" "${all_assets}" "$(assets "${store}")"
+release_case existing-draft-only-added "" "view upload" new
+check "release existing-draft-only-added: still a draft" draft "$(state "${store}")"
+check "release existing-draft-only-added: every asset" "${all_assets}" "$(assets "${store}")"
+release_case existing-published-only-added "" "view upload" published
+check "release existing-published-only-added: still published" published "$(state "${store}")"
+release_case missing-tag-not-created release "view create" missing
+check "release missing-tag-not-created: no release" absent "$(state "${store}")"
+check "release missing-tag-not-created: no tag created" "" "$(cat "${store}/tags")"
+release_case create-fails release "view create" tagged FAKE_GH_FAIL=create
+check "release create-fails: no release" absent "$(state "${store}")"
+release_case upload-fails-created-deleted release "view create upload delete" tagged FAKE_GH_FAIL=upload
+check "release upload-fails-created-deleted: no release left" absent "$(state "${store}")"
+check "release upload-fails-created-deleted: the tag is kept" v1 "$(cat "${store}/tags")"
+release_case publish-fails-created-deleted release "view create upload edit delete" tagged FAKE_GH_FAIL=edit
+check "release publish-fails-created-deleted: no release left" absent "$(state "${store}")"
+release_case upload-fails-existing-kept release "view upload" new FAKE_GH_FAIL=upload
+check "release upload-fails-existing-kept: the draft is kept" draft "$(state "${store}")"
+check "release upload-fails-existing-kept: no asset" "" "$(assets "${store}")"
+
+echo "== the fake gh (test/fake-gh) behaves like the real one where the action depends on it"
+# fgh <args...>: runs the fake on the store $fs and prints its exit code.
+fgh() {
+	local rc=0
+	FAKE_GH_ROOT="${fs}" "${fakebin}/gh" "$@" >/dev/null 2>&1 || rc=$?
+	echo "${rc}"
+}
+fs="${work}/fake-store"
+rm -rf "${fs}"
+mkdir -p "${work}/fake-files"
+echo one >"${work}/fake-files/a.txt"
+echo two >"${work}/fake-files/b.txt"
+echo changed >"${work}/fake-files/c.txt"
+check "fake: view of an unknown release fails" 1 "$(fgh release view v1 --repo o/r)"
+check "fake: create --verify-tag needs the tag" 1 "$(fgh release create v1 --repo o/r --draft --verify-tag)"
+check "fake: that failure created nothing" absent "$(state "${fs}")"
+check "fake: create without --verify-tag creates the tag" 0 "$(fgh release create v1 --repo o/r --draft)"
+check "fake: the tag was created" v1 "$(cat "${fs}/tags")"
+check "fake: --draft creates a draft" draft "$(state "${fs}")"
+check "fake: a second create fails (HTTP 422)" 1 "$(fgh release create v1 --repo o/r --draft)"
+check "fake: view finds the draft" 0 "$(fgh release view v1 --repo o/r)"
+check "fake: upload to an unknown release fails" 1 "$(fgh release upload v2 --repo o/r "${work}/fake-files/a.txt")"
+check "fake: upload of a missing file fails" 1 "$(fgh release upload v1 --repo o/r "${work}/fake-files/a.txt" "${work}/fake-files/nope.txt")"
+check "fake: ... and uploads nothing" "" "$(assets "${fs}")"
+check "fake: upload works" 0 "$(fgh release upload v1 --repo o/r "${work}/fake-files/a.txt" "${work}/fake-files/b.txt")"
+check "fake: the assets are there" "a.txt b.txt " "$(assets "${fs}")"
+cp "${work}/fake-files/c.txt" "${work}/fake-files/a.txt.new"
+mv "${work}/fake-files/a.txt.new" "${work}/fake-files/a.txt"
+check "fake: an existing asset is not overwritten" 1 "$(fgh release upload v1 --repo o/r "${work}/fake-files/a.txt")"
+check "fake: ... and keeps its content" one "$(cat "${fs}/v1/assets/a.txt")"
+check "fake: upload stops at the first existing asset, keeping the earlier ones" 1 \
+	"$(echo new >"${work}/fake-files/z.txt" && fgh release upload v1 --repo o/r "${work}/fake-files/z.txt" "${work}/fake-files/b.txt")"
+check "fake: ... as the real command can leave a partial upload" "a.txt b.txt z.txt " "$(assets "${fs}")"
+check "fake: --clobber overwrites" 0 "$(fgh release upload v1 --repo o/r --clobber "${work}/fake-files/a.txt")"
+check "fake: ... with the new content" changed "$(cat "${fs}/v1/assets/a.txt")"
+check "fake: publishing" 0 "$(fgh release edit v1 --repo o/r --draft=false)"
+check "fake: state is published" published "$(state "${fs}")"
+check "fake: back to draft" 0 "$(fgh release edit v1 --repo o/r --draft=true)"
+check "fake: state is draft again" draft "$(state "${fs}")"
+check "fake: edit of anything else is refused" 1 "$(fgh release edit v1 --repo o/r --title x)"
+check "fake: delete needs --yes" 1 "$(fgh release delete v1 --repo o/r)"
+check "fake: delete removes the release but keeps the tag" 0 "$(fgh release delete v1 --repo o/r --yes)"
+check "fake: ... the release is gone" absent "$(state "${fs}")"
+check "fake: ... the tag stays" v1 "$(cat "${fs}/tags")"
+check "fake: create without --draft publishes" 0 "$(fgh release create v1 --repo o/r --verify-tag)"
+check "fake: ... so the state is published" published "$(state "${fs}")"
+check "fake: delete --cleanup-tag removes the tag too" 0 "$(fgh release delete v1 --repo o/r --yes --cleanup-tag)"
+check "fake: ... the tag is gone" "" "$(cat "${fs}/tags")"
+for verb in view create upload edit delete; do
+	check "fake: FAKE_GH_FAIL=${verb} fails ${verb}" 1 "$(FAKE_GH_FAIL="${verb}" fgh release "${verb}" v9 --repo o/r --draft --yes)"
+done
+check "fake: FAKE_GH_FAIL fails before changing anything" "" "$(find "${fs}" -mindepth 1 -maxdepth 1 ! -name tags ! -name calls.log)"
+check "fake: FAKE_GH_FAIL takes a list" 1 "$(FAKE_GH_FAIL=edit,upload fgh release upload v9 --repo o/r "${work}/fake-files/a.txt")"
+check "fake: other gh calls exit 99" 99 "$(fgh pr list)"
+check "fake: other release calls exit 99" 99 "$(fgh release list)"
+check "fake: calls are logged" "release view v1 --repo o/r" "$(head -1 "${fs}/calls.log")"
+rc=0
+env -u FAKE_GH_ROOT "${fakebin}/gh" release view v1 >/dev/null 2>&1 || rc=$?
+check "fake: needs FAKE_GH_ROOT" 1 "${rc}"
+
+echo "== the fake signer and the seeds of the fake store"
+sd="$(new_dir signer)"
+sign_case() {
+	local label="$1" expected="$2" mode="$3"
+	(cd "${sd}/rt/sign-pypi-package" && rm -f ./*.sigstore.json && fake_sigstore_sign "${mode}" SHA256SUMS pkg-1.whl pkg-1.tar.gz)
+	check "signer ${label}" "${expected}" "$(cd "${sd}/rt/sign-pypi-package" && for f in $(find . -maxdepth 1 -name '*.sigstore.json' | sed 's|^\./||' | LC_ALL=C sort); do if [ -s "${f}" ]; then echo "${f}"; else echo "${f}(empty)"; fi; done | tr '\n' ' ')"
+}
+make_dist "${sd}/rt/sign-pypi-package" pkg-1.whl pkg-1.tar.gz
+sign_case all "SHA256SUMS.sigstore.json pkg-1.tar.gz.sigstore.json pkg-1.whl.sigstore.json " all
+sign_case skip "SHA256SUMS.sigstore.json pkg-1.tar.gz.sigstore.json " skip:pkg-1.whl
+sign_case empty "SHA256SUMS.sigstore.json(empty) pkg-1.tar.gz.sigstore.json pkg-1.whl.sigstore.json " empty:SHA256SUMS
+sign_case none "" none
+for kind in new same draft published tagged missing none dash space; do
+	rm -rf "${sd}/store"
+	fake_gh_seed "${sd}/store" "${kind}" v1
+	case "${kind}" in
+	new | same | draft) exp="v1 draft" ;;
+	published) exp="v1 published" ;;
+	tagged) exp="v1 absent" ;;
+	*) exp=" absent" ;;
+	esac
+	check "seed ${kind}" "${exp}" "$(cat "${sd}/store/tags" | tr -d '\n') $(state "${sd}/store")"
+done
+rm -rf "${sd}/store"
+check "an unknown seed kind is refused" 1 "$(fake_gh_seed "${sd}/store" bogus v1 >/dev/null 2>&1 && echo 0 || echo 1)"
+
+echo "== gh flags that the action relies on exist in the installed gh"
+# The fake only proves that the action matches the fake. This catches a renamed flag in the real
+# gh, offline; the real-release job of ci-action.yaml checks the semantics. Skipped without gh.
+if command -v gh >/dev/null 2>&1; then
+	gh_flag() { # gh_flag <subcommand> <flag>
+		local h
+		h="$(gh release "$1" --help 2>&1 || true)"
+		check "gh release $1 has $2" yes "$(grep -qF -- "$2" <<<"${h}" && echo yes || echo no)"
+	}
+	gh_flag create --draft
+	gh_flag create --verify-tag
+	gh_flag create --title
+	gh_flag create --notes
+	gh_flag upload --clobber
+	gh_flag edit --draft
+	gh_flag delete --yes
+	gh_flag delete --cleanup-tag
+else
+	echo "skip the gh flag check (gh is not installed)"
+fi
 
 echo "== step 4.1: success summary"
 d="$(new_dir summary)"
