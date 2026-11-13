@@ -292,7 +292,7 @@ done
 check "case names are unique" "" "$(jq -r '[.[].name] | group_by(.)[] | select(length > 1) | .[0]' "${root}/test/cases.json")"
 check "case names are kebab-case" "" "$(jq -r '.[].name | select(test("^[a-z0-9]+(-[a-z0-9]+)*$") | not)' "${root}/test/cases.json")"
 check "case fields are known" "" "$(jq -r '.[] | .name as $n | keys[] | select(IN("name","stage","expected","released","runs","tag","artifact") | not) | "\($n): \(.)"' "${root}/test/cases.json")"
-check "case tags are known" "" "$(jq -r '.[] | select(.tag != null and (.tag | IN("new","same","unreleased","missing","none","dash","space","draft") | not)) | .name' "${root}/test/cases.json")"
+check "case tags are known" "" "$(jq -r '.[] | select(.tag != null and (.tag | IN("new","same","missing","none","dash","space","draft") | not)) | .name' "${root}/test/cases.json")"
 check "case expected ids are known" "" "$(jq -r --arg ids "${action_ids}unexpected " '.[] | select(.expected != "") | .expected as $e | select(($ids | split(" ")) | index($e) | not) | .name' "${root}/test/cases.json")"
 check "case runs are 1 or 2" "" "$(jq -r '.[] | select(.runs != null and (.runs | IN(1,2) | not)) | .name' "${root}/test/cases.json")"
 check "every case has a stage" "" "$(jq -r '.[] | select((.stage // "") == "") | .name' "${root}/test/cases.json")"

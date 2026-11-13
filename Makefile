@@ -18,12 +18,13 @@ format: format-yaml format-makefile format-shell format-markdown ## Format all f
 lint: lint-yaml lint-makefile lint-shell lint-markdown lint-actions ## Lint all files
 
 .PHONY: clean-throwaway-releases
-clean-throwaway-releases: ## Delete the releases (and their tags) titled "(throwaway, will be deleted)"
+clean-throwaway-releases: ## Delete the throwaway releases (drafts included, and any tag they left) titled "(throwaway, will be deleted)"
 	gh release list --limit 1000 --json name,tagName \
 		--jq '.[] | select(.name | contains("(throwaway, will be deleted)")) | .tagName' \
 		| while read -r tag; do \
 			echo "Deleting release $$tag"; \
-			gh release delete "$$tag" --yes --cleanup-tag; \
+			gh release delete "$$tag" --yes; \
+			gh api -X DELETE "repos/{owner}/{repo}/git/refs/tags/$$tag" >/dev/null 2>&1 || true; \
 		done
 
 .PHONY: test-local
