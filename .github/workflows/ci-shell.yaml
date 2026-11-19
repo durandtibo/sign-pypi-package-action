@@ -1,5 +1,5 @@
 # Shell tests workflow.
-# Runs, on multiple operating systems, the tests of the bash steps of action.yml that need no
+# Runs, on multiple operating systems, the tests of the bash steps of action.yaml that need no
 # GitHub runner features (the unit tier): the escaping of the failure helper (step 0.1), every row
 # of test/cases.json run through the whole action with a fake artifact download, signer and gh
 # (scripts/fake-runner.sh), and the tests of each step. Real signing, the real artifact service and
@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: |
           source scripts/test-helper.sh
-          assert_fail_helper_escapes action.yml
+          assert_fail_helper_escapes action.yaml
 
       - name: Run the unit tests
         # Every row of test/cases.json against the fakes, and each step in isolation.

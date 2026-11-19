@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The unit tier: runs every row of test/cases.json that does not need a real GitHub service through
-# the whole action, on this machine. The real steps of action.yml are extracted and run in order by
+# the whole action, on this machine. The real steps of action.yaml are extracted and run in order by
 # scripts/fake-runner.sh; only the infrastructure is faked (artifact download, Sigstore, gh over a
 # store directory, the OIDC token). Each row asserts the failed-check id and the state of the fake
 # releases afterwards: assets byte-identical to the dist, nothing attached by a rejected run, drafts
@@ -17,7 +17,7 @@ source "${root}/scripts/test-helper.sh"
 source "${root}/scripts/fake-runner.sh"
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
-fake_runner_init "${root}/action.yml" "${work}"
+fake_runner_init "${root}/action.yaml" "${work}"
 
 # The ids of the checks that run before any release call: a run rejected by one of them must not
 # have called gh at all.

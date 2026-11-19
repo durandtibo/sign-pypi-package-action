@@ -1,0 +1,25 @@
+# Check that the files exported by `git archive` (what the consumers of a release get) are
+# exactly the files the action needs at runtime. `uses: ./` in ci-action.yaml runs the whole
+# checkout and hides a file that .gitattributes marks export-ignore by mistake.
+
+name: Check Export
+on:
+  workflow_call:
+  workflow_dispatch: # to trigger manually
+
+permissions: {}
+
+jobs:
+  check-export:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7
+
+      - name: Check the exported files
+        run: |
+          make check-export

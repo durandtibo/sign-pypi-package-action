@@ -1,9 +1,14 @@
 # The integration tier: end-to-end tests of this composite action on GitHub runners, for both the
-# code in this checkout (released: false, uses: ./) and the last released tag (released: true), so
+# code in this checkout (use-released: false, uses: ./) and the last released tag (use-released: true), so
 # the two never drift apart. They check what the unit tier (`make test-local`, which runs every row
 # of test/cases.json against fakes) cannot: that the real artifact service, the real Sigstore and the
 # real `gh` behave as the fakes assume. Keep it small: each job below makes few or no GitHub API
 # calls, to stay clear of the rate limit of the token.
+#
+# General behaviour vs edge cases: the `sign` job (the default usage, signing the good dist and
+# releasing it) is the general behaviour and crosses the full os_matrix. The signing has no Python
+# dimension. Every other job is an edge case or a contract test and runs on one runner (ubuntu-latest):
+# `release`, `case` and `permissions`.
 #
 # - build: builds the fixture package once and uploads it as "dist-base".
 # - sign: across Linux/macOS, runs the action with the fake gh of test/fake-gh (a release in a local
@@ -33,7 +38,7 @@ on:
         description: "JSON test matrix from lib-get-test-matrix.yaml, loaded once by the caller"
         required: true
         type: string
-      released:
+      use-released:
         description: "Test the last released tag instead of this checkout"
         required: false
         default: false
@@ -73,10 +78,10 @@ jobs:
       - name: Load test cases
         id: cases
         env:
-          RELEASED: ${{ inputs.released }}
+          RELEASED: ${{ inputs.use-released }}
         run: |
           # Only the rows that need the real artifact service run here; the others run in `make test-local`.
-          # With released: true only the rows flagged "released" run.
+          # With use-released: true only the rows flagged "released" run.
           echo "cases=$(jq -c --argjson r "${RELEASED}" 'map(select(.integration == true and .local != true and ($r == false or .released == true)))' test/cases.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload distributions
@@ -117,14 +122,14 @@ jobs:
           use_fake_gh "${RUNNER_TEMP}/fake-gh-store" new "${TAG}"
 
       - name: Run sign action (this checkout)
-        if: ${{ !inputs.released }}
+        if: ${{ !inputs.use-released }}
         uses: ./
         with:
           tag-name: ${{ env.TAG }}
           dist-artifact-name: dist-base
 
       - name: Run sign action (released)
-        if: ${{ inputs.released }}
+        if: ${{ inputs.use-released }}
         uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:
           tag-name: ${{ env.TAG }}
@@ -193,14 +198,14 @@ jobs:
           create_draft_release "${TAG}"
 
       - name: Run sign action (this checkout)
-        if: ${{ !inputs.released }}
+        if: ${{ !inputs.use-released }}
         uses: ./
         with:
           tag-name: ${{ env.TAG }}
           dist-artifact-name: dist-base
 
       - name: Run sign action (released)
-        if: ${{ inputs.released }}
+        if: ${{ inputs.use-released }}
         uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:
           tag-name: ${{ env.TAG }}
@@ -246,6 +251,7 @@ jobs:
     needs: [build]
     if: needs.build.outputs.cases != '[]'
     strategy:
+      max-parallel: 8
       fail-fast: false
       matrix:
         include: ${{ fromJson(needs.build.outputs.cases) }}
@@ -261,7 +267,7 @@ jobs:
 
       - name: Run sign action (this checkout)
         id: local
-        if: ${{ !inputs.released }}
+        if: ${{ !inputs.use-released }}
         continue-on-error: true
         uses: ./
         with:
@@ -270,7 +276,7 @@ jobs:
 
       - name: Run sign action (released)
         id: released
-        if: ${{ inputs.released }}
+        if: ${{ inputs.use-released }}
         continue-on-error: true
         uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:
@@ -301,7 +307,7 @@ jobs:
 
       - name: Run sign action without id-token permission (this checkout)
         id: local
-        if: ${{ !inputs.released }}
+        if: ${{ !inputs.use-released }}
         continue-on-error: true
         uses: ./
         with:
@@ -310,7 +316,7 @@ jobs:
 
       - name: Run sign action without id-token permission (released)
         id: released
-        if: ${{ inputs.released }}
+        if: ${{ inputs.use-released }}
         continue-on-error: true
         uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
         with:

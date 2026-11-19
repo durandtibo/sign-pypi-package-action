@@ -9,7 +9,7 @@
 # Permissions are set at the job level, not the workflow level.
 #
 # The individual check jobs below call out to per-check reusable workflows
-# (ci-format.yaml, ci-shell.yaml, ci-action.yaml) instead of inlining their steps here, so each
+# (ci-format.yaml, ci-shell.yaml, ci-export.yaml, ci-action.yaml) instead of inlining their steps here, so each
 # check can still be run on its own.
 
 name: CI
@@ -48,6 +48,12 @@ jobs:
     permissions:
       contents: read
 
+  # Check that the files exported by git archive (what consumers get) are the files the action needs
+  export:
+    uses: ./.github/workflows/ci-export.yaml
+    permissions:
+      contents: read
+
   # Decide whether this run needs the release job of ci-action.yaml, which creates a throwaway draft
   # release with the real gh (a few API calls). The pull requests that change nothing that could make
   # the fake gh of the tests drift from the real one skip it; every other trigger runs it.
@@ -75,7 +81,7 @@ jobs:
           if [ "${EVENT}" = pull_request ]; then
             changed="$(git diff --name-only "${BASE_SHA}" HEAD)"
             # What the real gh behaviour matters to: the action, the fake, the fixtures and the workflows that run them.
-            if ! grep -qE '^(action\.yml|test/fake-gh/|test/fixtures/|scripts/(test-helper|fake-runner)\.sh|\.github/workflows/(ci|ci-action|nightly)\.yaml)' <<<"${changed}"; then
+            if ! grep -qE '^(action\.yaml|test/fake-gh/|test/fixtures/|scripts/(test-helper|fake-runner)\.sh|\.github/workflows/(ci|ci-action|nightly)\.yaml)' <<<"${changed}"; then
               real=false
             fi
           fi
@@ -88,7 +94,7 @@ jobs:
     uses: ./.github/workflows/ci-action.yaml
     with:
       test-matrix: ${{ needs.get-matrix.outputs.test_matrix }}
-      released: false
+      use-released: false
       real-release: ${{ needs.changes.outputs.real-release == 'true' }}
     permissions:
       contents: write # create/delete the throwaway draft release of the release job

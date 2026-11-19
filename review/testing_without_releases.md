@@ -50,7 +50,7 @@ learn what a few lines of bash can decide on a laptop. Only a handful of behavio
 | Flakiness sources | none                                              | artifact service, Rekor/Fulcio, rate limits           |
 
 The existing `make test-local` is already the unit tier (`scripts/test-local.sh` and
-`scripts/test-steps.sh` run the steps extracted from `action.yml`). The proposal widens it until it covers
+`scripts/test-steps.sh` run the steps extracted from `../action.yaml`). The proposal widens it until it covers
 every row, and shrinks the integration tier to what only GitHub can prove.
 
 ## 3. What is mocked, and how
@@ -65,13 +65,13 @@ useful.
 | Sigstore signing       | 2.2  | a fake signer writes `<file>.sigstore.json` for every input (or a subset, or none)     | real                     |
 | GitHub releases (`gh`) | 3.1  | stateful fake `gh` over a local directory (section 3.1)                                | real, few calls          |
 
-The harness runs the **real step scripts** extracted from `action.yml` in order (0.1, 0.2, 1.2, 1.3, 1.4,
+The harness runs the **real step scripts** extracted from `../action.yaml` in order (0.1, 0.2, 1.2, 1.3, 1.4,
 2.1, 2.3, 3.1, 4.1, 4.2) with the mocks standing in for the three `uses:` steps and the infrastructure.
 The logic under test is never copied: the steps are extracted by `extract_step`, as today. (read)
 
 ### 3.1 The fake `gh`
 
-One script, `test/fake-gh/gh`, implementing exactly the calls `action.yml` makes, over a store directory
+One script, `test/fake-gh/gh`, implementing exactly the calls `../action.yaml` makes, over a store directory
 `$FAKE_GH_ROOT`:
 
 ```text
@@ -149,13 +149,13 @@ Everything else of the 39 rows leaves the integration tier. Remaining jobs: abou
 10 API calls, once per run, not 39 times. It keeps the "drafts only, never public, title marker" rules of
 `CLAUDE.md` unchanged, and `make clean-throwaway-releases` stays. This is the check that the real `gh`
 behaves as the fake claims, so it is the guard against fake drift. Run it on pushes to `main`, the nightly
-schedule and manual runs, and on pull requests only when `action.yml` or `test/fake-gh/` changes (a `paths`
+schedule and manual runs, and on pull requests only when `../action.yaml` or `test/fake-gh/` changes (a `paths`
 filter or a `changes` job), so documentation PRs spend nothing.
 
 **One sibling-contract job** (nightly): build the fixture with `build-pypi-package-action` pinned to a SHA,
 then run this action (`uses: ./`) on its artifact with the fake `gh`. It checks the `dist` / `SHA256SUMS`
 contract between the two actions without a release. The sibling's artifact name and layout must be read from
-its `action.yml` when this is written. (confirm in CI)
+its `../action.yaml` when this is written. (confirm in CI)
 
 **Where the fake `gh` is used in the integration tier.** The `sign` and `case` jobs that remain can still
 run with the fake in front of `PATH` when they only need signing and artifact download, not a real release:
@@ -230,7 +230,7 @@ Each PR is independent and leaves CI green. `CLAUDE.md` ("Tests") changes with P
 - **Rate-limit numbers** above are from documentation, not from this repository. Before PR 3, read the
   `x-ratelimit-*` headers (`gh api -i rate_limit`) at the start and end of a run to measure the real spend.
 - **Decision for the maintainer:** run the real-release job on every pull request that touches
-  `action.yml` (safer, small spend), or only after merge (cheaper, a drift is found one merge late)?
+  `../action.yaml` (safer, small spend), or only after merge (cheaper, a drift is found one merge late)?
 
 ## 10. Status and corrections
 
