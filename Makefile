@@ -1,21 +1,7 @@
 SHELL = /bin/bash
 
-include .make/actions.mk
-include .make/help.mk
-include .make/makefile.mk
-include .make/markdown.mk
-include .make/self.mk
-include .make/shell.mk
-include .make/uv.mk
-include .make/yaml.mk
+include .make/all.mk
 
-.DEFAULT_GOAL := help
-
-.PHONY: format
-format: format-yaml format-makefile format-shell format-markdown ## Format all files
-
-.PHONY: lint
-lint: lint-yaml lint-makefile lint-shell lint-markdown lint-actions ## Lint all files
 
 .PHONY: clean-throwaway-releases
 clean-throwaway-releases: ## Delete the throwaway releases (drafts included) titled "(throwaway, will be deleted)" and the CI test tags (ci-<name>-<run id>-<attempt>)
