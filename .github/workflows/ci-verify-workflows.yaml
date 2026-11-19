@@ -1,29 +1,23 @@
 # Workflow validation workflow.
 # Verifies GitHub Actions workflow files are valid and follow best practices.
-# Triggers on changes to workflow files to catch issues early.
+# Runs on every pull request and push to main (no path filter, so it can be a
+# required check).
 
 name: Verify Workflows
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/**" # Trigger on changes to workflow files
-      - ".github/actions/**"
   push:
-    paths:
-      - ".github/workflows/**" # Trigger on changes to workflow files
-      - ".github/actions/**"
+    branches:
+      - main
   workflow_dispatch: # to trigger manually
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   verify-workflows:
+    permissions:
+      contents: read
     runs-on: ubuntu-slim
     timeout-minutes: 5
 
