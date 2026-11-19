@@ -4,7 +4,7 @@
 # unit tests (scripts/test-local.sh, scripts/test-steps.sh): a fake `gh` store and a fake signer.
 set -euo pipefail
 
-# extract_step <action.yml> <step number>: the run: block of the step (for example "3.1"), de-indented.
+# extract_step <action.yaml> <step number>: the run: block of the step (for example "3.1"), de-indented.
 extract_step() {
 	awk -v p="- name: $2 " '
 		index($0, p) { s = 1; next }
@@ -283,7 +283,7 @@ assert_single_error() {
 	}
 }
 
-# assert_fail_helper_escapes <action.yml>
+# assert_fail_helper_escapes <action.yaml>
 # Runs the failure helper of step 0.1 on hostile details (a fake workflow command,
 # a CR, a fence) and checks the annotation and the summary. Needs no GitHub runner.
 assert_fail_helper_escapes() {

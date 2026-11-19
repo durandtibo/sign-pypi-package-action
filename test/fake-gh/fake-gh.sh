@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # A fake `gh` for the tests that must not touch GitHub: the "releases" are directories under
-# $FAKE_GH_ROOT. It implements exactly the `gh release` calls that action.yml makes. Anything else
+# $FAKE_GH_ROOT. It implements exactly the `gh release` calls that action.yaml makes. Anything else
 # exits 99, so a new call in the action cannot go unnoticed. Put test/fake-gh first on PATH (the
 # symlink `gh` points here); the real behaviour of each call is described in its comment, and the
 # real-release job of ci-action.yaml is what checks that the fake does not drift from it.

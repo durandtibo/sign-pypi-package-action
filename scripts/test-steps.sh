@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Step-level tests of action.yml that need no GitHub runner. The run: block of each bash step is
-# extracted from action.yml and executed on a fake runner directory, so the real code is tested:
+# Step-level tests of action.yaml that need no GitHub runner. The run: block of each bash step is
+# extracted from action.yaml and executed on a fake runner directory, so the real code is tested:
 #   - 0.1 cleanup of a previous run, 0.2 tag resolution (and output injection)
 #   - 1.2 outputs, 1.4 with the `shasum -a 256` fallback
 #   - 2.1 permission check, 2.3 bundle check
 #   - 3.1 release logic against the fake `gh` of test/fake-gh (draft handling, cleanup, no overwrite,
 #     no --cleanup-tag), and the fake itself and the `gh` flags it models
 #   - 4.1 success summary, 4.2 failed-check output
-#   - consistency of action.yml, README.md, test/cases.json and the workflows
+#   - consistency of action.yaml, README.md, test/cases.json and the workflows
 # The table of test/cases.json is run by test-local.sh; signing and real releases by ci-action.yaml.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-action="${root}/action.yml"
+action="${root}/action.yaml"
 # shellcheck source=scripts/test-helper.sh
 source "${root}/scripts/test-helper.sh"
 work="$(mktemp -d)"
@@ -415,11 +415,11 @@ d="$(new_dir report-empty)"
 run_step "${d}" 4.2
 check "an empty id is unexpected" "failed-check=unexpected" "$(cat "${d}/out")"
 
-echo "== consistency of action.yml, README.md, test/cases.json and the workflows"
+echo "== consistency of action.yaml, README.md, test/cases.json and the workflows"
 workflows="${root}/.github/workflows"
 action_ids="$(grep -oE '(^|[^a-z])fail [a-z][a-z-]* "' "${action}" | sed -E 's/.*fail ([a-z-]+) "/\1/' | sort -u | tr '\n' ' ')"
 readme_ids="$(grep -E '^\| [0-9]\.[0-9]' "${root}/README.md" | awk -F'|' '{gsub(/[` ]/, "", $(NF-1)); print $(NF-1)}' | grep -vx unexpected | sort -u | tr '\n' ' ')"
-check "fail ids of action.yml are the ids of the README table" "${readme_ids}" "${action_ids}"
+check "fail ids of action.yaml are the ids of the README table" "${readme_ids}" "${action_ids}"
 output_ids="$(sed -n '/^outputs:/,/^runs:/p' "${action}" | grep -oE '\(tag, [a-z, -]*\)' | tr -d '(),' | tr ' ' '\n' | grep -v '^$' | sort | tr '\n' ' ')"
 check "ids listed in the output description are the fail ids" "${action_ids}" "${output_ids}"
 
@@ -452,7 +452,7 @@ check "every case has a stage" "" "$(jq -r '.[] | select((.stage // "") == "") |
 
 inputs_action="$(sed -n '/^inputs:/,/^outputs:/p' "${action}" | grep -oE '^  [a-z-]+:' | tr -d ' :' | sort | tr '\n' ' ')"
 inputs_readme="$(sed -n '/^## Inputs/,/^## Outputs/p' "${root}/README.md" | grep -oE "^\\| \`[a-z-]+\`" | tr -d '|` ' | sort | tr '\n' ' ')"
-check "inputs of action.yml are the inputs of the README" "${inputs_readme}" "${inputs_action}"
+check "inputs of action.yaml are the inputs of the README" "${inputs_readme}" "${inputs_action}"
 
 # Every run: step sets shell: bash.
 check "every run: step sets shell: bash" "" "$(awk '

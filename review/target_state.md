@@ -24,7 +24,7 @@ one contract. P2, P4, P8 and P9 are sharpened by this review.
 | P3  | **Ground truth**   | One file list, derived once from `SHA256SUMS` and the directory, is checked, signed and released. Nothing is re-globbed. Every released file, `SHA256SUMS` included, has a signature bundle.                                                                           |
 | P4  | **Reproducible**   | Every third-party action is pinned to a SHA. Nothing but the signing action installs anything at run time. No cache. Only `bash`, `gh` and `sha256sum`/`shasum` from the runner image are assumed.                                                                     |
 | P5  | **Fast**           | Local checks run before network calls (tag, checksums, permissions, then Sigstore). No checkout, no second artifact upload. Sigstore signing is the only slow step and runs once.                                                                                      |
-| P6  | **Simple**         | All logic is inline in `action.yml`, in steps of about 15 lines. Three inputs, one output. Tests are one table and one workflow, not copies.                                                                                                                           |
+| P6  | **Simple**         | All logic is inline in `../action.yaml`, in steps of about 15 lines. Three inputs, one output. Tests are one table and one workflow, not copies.                                                                                                                       |
 | P7  | **Portable**       | Same behaviour on Linux and macOS (Windows is not supported). Keep the `shasum -a 256` fallback.                                                                                                                                                                       |
 | P8  | **Safe to chain**  | Re-entrant: the action can run several times in one job, with different artifacts, after the build action, and leaves no state that changes the next run. Fixed paths are cleaned first. It never touches the caller's workspace and never overwrites a release asset. |
 | P9  | **Secure**         | Inputs and step outputs reach scripts through `env:` only. Untrusted text (file names, `SHA256SUMS` lines) is escaped before it becomes a workflow command. The caller grants `id-token: write` and `contents: write` only. The only secret is `github.token`.         |
@@ -130,14 +130,14 @@ one `::error` (see 5.2).
 
 ### F7. Docs disagree with the code (violates P11) **(read)**
 
-- The `failed-check` description in `action.yml` lists `tag, checksums-file, file-set, checksum` and
+- The `failed-check` description in `../action.yaml` lists `tag, checksums-file, file-set, checksum` and
   omits `release`; the README lists it. The new ids of this review (`permissions`, `bundle`) would drift
   the same way.
-- The `dist-artifact-name` description in `action.yml` is a paragraph about this repository's own tests.
+- The `dist-artifact-name` description in `../action.yaml` is a paragraph about this repository's own tests.
   It describes the input, not the project's CI.
 - The README "How it works" table and the `CLAUDE.md` step list repeat the step ids by hand.
 
-**Fix:** one list of ids, written in the README table, and the output description in `action.yml` says
+**Fix:** one list of ids, written in the README table, and the output description in `../action.yaml` says
 "see the README table" plus the ids by name. Rewrite the input description in one sentence.
 The case table is the check: every id in the README table has a row (5.1).
 
@@ -161,7 +161,7 @@ is to run every case with the real permissions and assert that nothing was attac
 
 ### F10. Test coverage gaps (violates P10) **(read)**
 
-Missing rows for behaviours of `action.yml`:
+Missing rows for behaviours of `../action.yaml`:
 
 - Release creation failure (tag not pushed): 3.1 can fail on `gh release create` and no row reaches it.
 - A release the action creates: every current row uses a release that the test created, so the
@@ -401,7 +401,7 @@ Listed under "Tests" in `CLAUDE.md`; add to it:
 | P8  | Work directory removed in 0.1 and namespaced (F1); `chained-runs` row; no `--clobber`; only a draft created by this run is ever deleted.            |
 | P9  | `env:` for every input; complete escaping (F6) with a hostile-input row; permissions documented.                                                    |
 | P10 | 20 rows, one per failure reason, bug-fix rows for F1 and F6; exceptions listed in 5.3.                                                              |
-| P11 | One id table in the README, same ids in `action.yml`; success summary with URL, assets and verify command.                                          |
+| P11 | One id table in the README, same ids in `../action.yaml`; success summary with URL, assets and verify command.                                      |
 | P12 | Twelve steps, `N.x` names, one id each.                                                                                                             |
 
 ## 8. Migration order

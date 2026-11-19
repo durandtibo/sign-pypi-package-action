@@ -1,0 +1,20 @@
+# Ship only what the action needs at runtime (action.yaml and LICENSE). The action is a composite
+# action with its logic inline: it reads no other file of the repository.
+# Everything else is excluded from `git archive`. When the action starts using a new file,
+# un-ignore it here and add it to EXPECTED in dev/check_export.sh.
+/.github/ export-ignore
+/.idea/ export-ignore
+/.make/ export-ignore
+/dev/ export-ignore
+/review/ export-ignore
+/scripts/ export-ignore
+/test/ export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore
+/.markdownlint.yaml export-ignore
+/.yamllint.yaml export-ignore
+/CLAUDE.md export-ignore
+/CODEOWNERS export-ignore
+/Makefile export-ignore
+/README.md export-ignore
+/checkmake.ini export-ignore

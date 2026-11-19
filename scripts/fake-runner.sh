@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# A fake runner for the unit tests: runs the real steps of action.yml, in order, on this machine.
+# A fake runner for the unit tests: runs the real steps of action.yaml, in order, on this machine.
 # Only the infrastructure is replaced:
 #   1.1 download-artifact  -> a copy of a staged directory into ${RUNNER_TEMP}/sign-pypi-package
 #   2.2 Sigstore           -> fake_sigstore_sign (scripts/test-helper.sh)
@@ -8,7 +8,7 @@
 # The run stops at the first failing step, like a job does, and step 4.2 (`if: failure()`) then
 # reports the failed-check id. Source it after scripts/test-helper.sh.
 
-# fake_runner_init <action.yml> <dir>: extracts every step to <dir>/steps. Call it once.
+# fake_runner_init <action.yaml> <dir>: extracts every step to <dir>/steps. Call it once.
 fake_runner_init() {
 	local s
 	FR_STEPS="$2/steps"

@@ -26,7 +26,7 @@ jobs:
     uses: ./.github/workflows/ci-action.yaml
     with:
       test-matrix: ${{ needs.get-matrix.outputs.test_matrix }}
-      released: true
+      use-released: true
     permissions:
       contents: write # create/delete the throwaway draft release and attach assets
       id-token: write # Sigstore OIDC keyless signing
