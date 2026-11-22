@@ -26,7 +26,7 @@
 # - permissions: runs the action on the good dist in a job without id-token: write and asserts the
 #   "permissions" id (permissions are per job, so this check cannot be a row of the case job).
 #
-# The released version (v0.1.0) supports every row flagged "released": true in test/cases.json. At
+# The released version (v0.1.1) supports every row flagged "released": true in test/cases.json. At
 # release time: flag the rows the new version supports, bump the SHA below (and the ratchet comment),
 # and delete the helpers that only existed for the old tag.
 
@@ -130,7 +130,7 @@ jobs:
 
       - name: Run sign action (released)
         if: ${{ inputs.use-released }}
-        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
+        uses: durandtibo/sign-pypi-package-action@0add3d41c042f2c855d4ac39bfd51e57987ca8fe # ratchet:durandtibo/sign-pypi-package-action@v0.1.1
         with:
           tag-name: ${{ env.TAG }}
           dist-artifact-name: dist-base
@@ -206,7 +206,7 @@ jobs:
 
       - name: Run sign action (released)
         if: ${{ inputs.use-released }}
-        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
+        uses: durandtibo/sign-pypi-package-action@0add3d41c042f2c855d4ac39bfd51e57987ca8fe # ratchet:durandtibo/sign-pypi-package-action@v0.1.1
         with:
           tag-name: ${{ env.TAG }}
           dist-artifact-name: dist-base
@@ -278,7 +278,7 @@ jobs:
         id: released
         if: ${{ inputs.use-released }}
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
+        uses: durandtibo/sign-pypi-package-action@0add3d41c042f2c855d4ac39bfd51e57987ca8fe # ratchet:durandtibo/sign-pypi-package-action@v0.1.1
         with:
           tag-name: ${{ env.TAG }}
           dist-artifact-name: ${{ matrix.artifact }}
@@ -318,7 +318,7 @@ jobs:
         id: released
         if: ${{ inputs.use-released }}
         continue-on-error: true
-        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
+        uses: durandtibo/sign-pypi-package-action@0add3d41c042f2c855d4ac39bfd51e57987ca8fe # ratchet:durandtibo/sign-pypi-package-action@v0.1.1
         with:
           tag-name: ci-permissions-${{ github.run_id }}-${{ github.run_attempt }}
           dist-artifact-name: dist-base
