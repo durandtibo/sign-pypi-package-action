@@ -93,7 +93,7 @@ assets), and nothing else. The action does not need `actions/checkout` and does 
 ## Usage
 
 Pin the action to a full commit SHA with the version in a comment. Releases are immutable exact tags
-(the latest is `v0.1.0`); there are no floating tags such as `v1`.
+(the latest is `v0.1.1`); there are no floating tags such as `v1`.
 
 ```yaml
 name: Release
@@ -123,7 +123,7 @@ jobs:
       contents: write
     steps:
       - name: Sign and release package
-        uses: durandtibo/sign-pypi-package-action@27337599193dc08605604ca7dd844528833f78b0 # ratchet:durandtibo/sign-pypi-package-action@v0.1.0
+        uses: durandtibo/sign-pypi-package-action@0add3d41c042f2c855d4ac39bfd51e57987ca8fe # ratchet:durandtibo/sign-pypi-package-action@v0.1.1
 ```
 
 ## Security model
